@@ -7,13 +7,13 @@ library(truncnorm)
 
 # Univariate Relationships ------------------------------------------------
 
-simulate_ab <- function(response) {
-  x <- 1:20
-  m_x <- foreach(i = 0:19, .combine = "rbind") %do%
+simulate_ab <- function(response, t_x = 0:19) {
+  s_x <- 1:20
+  m_x <- foreach(i = 1:20, .combine = "rbind") %do%
     {
-      x + i
+      s_x + t_x[i]
     }
-  m_x <- apply(m_x, c(1, 2), function(x) x + rnorm(1, 0, 1))
+  m_x <- t(apply(m_x, c(1, 2), function(x) x + rnorm(1, 0, 1)))
 
   dat_x <- data.frame(m_x)
   colnames(dat_x) <- 1:20
@@ -25,7 +25,7 @@ simulate_ab <- function(response) {
   dat_x$env_rand3 <- rnorm(nrow(dat_x), 0, 10)
 
   if (response == "spatial") {
-    a <- 10
+    a <- 1000
     b <- 10
     mu_x <- apply(m_x, 2, mean)
     mu_ab <- a + b * mu_x
@@ -48,7 +48,7 @@ simulate_ab <- function(response) {
   }
 
   if (response == "temporal-fixed") {
-    a <- 10
+    a <- 1000
     b <- 10
     mu_x <- apply(m_x, 1, mean)
     site_effects <- rnorm(20, 0, 10)
@@ -72,8 +72,9 @@ simulate_ab <- function(response) {
   }
 
   if (response == "temporal-variable") {
-    a <- 10
-    b <- rtruncnorm(20, a = 0, mean = 10, sd = 10)
+    a <- 1000
+    #b <- rtruncnorm(20, a = 0, mean = 10, sd = 10)
+    b <- rnorm(20, 10, 10)
     mu_x <- apply(m_x, 1, mean)
     site_effects <- rnorm(20, 0, 10)
     m_ab <- foreach(i = 1:length(mu_x), .combine = "cbind") %do%
@@ -96,11 +97,39 @@ simulate_ab <- function(response) {
   }
 
   if (response == "spatio-temporal") {
-    a <- 10
+    a <- 1000
     b <- 10
     mu_ab <- a + b * m_x
 
     m_ab <- apply(mu_ab, c(1, 2), function(x) rnorm(1, x, 10))
+
+    dat_ab <- data.frame(m_ab)
+    colnames(dat_ab) <- 1:20
+    dat_ab$site <- 1:20
+
+    dat_ab <- pivot_longer(
+      dat_ab,
+      !site,
+      names_to = "time",
+      values_to = "abundance"
+    )
+
+    dat_raw <- left_join(dat_ab, dat_x, by = c("site", "time"))
+  }
+
+  if (response == "spatial + temporal-variable") {
+    a <- 1000
+    b <- 10
+    mu_sx <- apply(m_x, 2, mean)
+    mu_ab <- a + b * mu_x
+
+    b2 <- rnorm(20, 10, 10)
+    mu_tx <- apply(m_x, 1, mean)
+    #site_effects <- rnorm(20, 0, 10)
+    m_ab <- foreach(i = 1:length(mu_tx), .combine = "cbind") %do%
+      {
+        mu_ab + b2 * mu_tx[i] #+ site_effects
+      }
 
     dat_ab <- data.frame(m_ab)
     colnames(dat_ab) <- 1:20
@@ -155,137 +184,72 @@ simulate_ab <- function(response) {
     )) %>%
     dplyr::arrange(site, time)
 
+  dat_raw <- dat_raw %>%
+    # center without scaling
+    dplyr::mutate(across(
+      all_of(decomp_vars),
+      ~ scale(., scale = FALSE)[, 1]
+    ))
+
   list(raw = dat_raw, dec = dat_dec)
 }
 
-dat_sp <- simulate_ab(response = "spatial")
-dat_temp <- simulate_ab(response = "temporal-fixed")
-dat_sptemp <- simulate_ab(response = "spatio-temporal")
-dat_tempvar <- simulate_ab(response = "temporal-variable")
+dat_sp1 <- simulate_ab(response = "spatial")
+dat_temp1 <- simulate_ab(response = "temporal-fixed")
+dat_sptemp1 <- simulate_ab(response = "spatio-temporal")
+dat_tempvar1 <- simulate_ab(response = "temporal-variable")
+dat_sptempvar1 <- simulate_ab(response = "spatial + temporal-variable")
 
-gm1 <- ggplot(data = dat_sp$raw) +
-  geom_point(
-    aes(x = env, y = abundance),
-    color = "pink3",
-    alpha = 0.5,
-    size = 2
-  ) +
-  geom_line(
-    aes(
-      x = env,
-      y = abundance,
-      group = site
-    ),
-    linewidth = 1.25,
-    color = "#333D79FF",
-    alpha = 0.75,
-    se = F,
-    method = "lm",
-    stat = "smooth"
-  ) +
-  labs(y = "Simulated Abundance", x = "Environmental Variable") +
-  #scale_y_continuous(breaks = seq(0, 125, 25), limits = c(0, 135)) +
-  theme(
-    legend.position = "none",
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
-    #axis.title.x = element_text(margin = margin(t = 10)),
-    #axis.title.y = element_text(margin = margin(r = 10)),
-    axis.title = element_text(size = 10)
-  )
+dat_sp2 <- simulate_ab(response = "spatial", t_x = seq(0, 9.5, 0.5))
+dat_temp2 <- simulate_ab(response = "temporal-fixed", t_x = seq(0, 9.5, 0.5))
+dat_sptemp2 <- simulate_ab(response = "spatio-temporal", t_x = seq(0, 9.5, 0.5))
+dat_tempvar2 <- simulate_ab(
+  response = "temporal-variable",
+  t_x = seq(0, 9.5, 0.5)
+)
+dat_sptempvar2 <- simulate_ab(
+  response = "spatial + temporal-variable",
+  t_x = seq(0, 9.5, 0.5)
+)
 
-gm2 <- ggplot(data = dat_temp$raw) +
-  geom_point(
-    aes(x = env, y = abundance),
-    color = "pink3",
-    alpha = 0.5,
-    size = 2
-  ) +
-  geom_line(
-    aes(
-      x = env,
-      y = abundance,
-      group = site
-    ),
-    linewidth = 1.25,
-    color = "#333D79FF",
-    alpha = 0.75,
-    se = F,
-    method = "lm",
-    stat = "smooth"
-  ) +
-  labs(y = "Simulated Abundance", x = "Environmental Variable") +
-  #scale_y_continuous(breaks = seq(0, 125, 25), limits = c(0, 135)) +
-  theme(
-    legend.position = "none",
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
-    #axis.title.x = element_text(margin = margin(t = 10)),
-    #axis.title.y = element_text(margin = margin(r = 10)),
-    axis.title = element_text(size = 10)
-  )
+plot_univ <- function(dat) {
+  ggplot(data = dat) +
+    geom_point(
+      aes(x = env, y = abundance),
+      color = "pink3",
+      alpha = 0.5,
+      size = 2
+    ) +
+    geom_line(
+      aes(
+        x = env,
+        y = abundance,
+        group = site
+      ),
+      linewidth = 1.25,
+      color = "#333D79FF",
+      alpha = 0.75,
+      se = F,
+      method = "lm",
+      stat = "smooth"
+    ) +
+    labs(y = "Simulated Abundance", x = "Environmental Variable") +
+    #scale_y_continuous(breaks = seq(0, 125, 25), limits = c(0, 135)) +
+    theme(
+      legend.position = "none",
+      panel.grid.minor = element_blank(),
+      panel.border = element_blank(),
+      #axis.title.x = element_text(margin = margin(t = 10)),
+      #axis.title.y = element_text(margin = margin(r = 10)),
+      axis.title = element_text(size = 10)
+    )
+}
 
-gm3 <- ggplot(data = dat_sptemp$raw) +
-  geom_point(
-    aes(x = env, y = abundance),
-    color = "pink3",
-    alpha = 0.5,
-    size = 2
-  ) +
-  geom_line(
-    aes(
-      x = env,
-      y = abundance,
-      group = site
-    ),
-    linewidth = 1.25,
-    color = "#333D79FF",
-    alpha = 0.75,
-    se = F,
-    method = "lm",
-    stat = "smooth"
-  ) +
-  labs(y = "Simulated Abundance", x = "Environmental Variable") +
-  #scale_y_continuous(breaks = seq(0, 125, 25), limits = c(0, 135)) +
-  theme(
-    legend.position = "none",
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
-    #axis.title.x = element_text(margin = margin(t = 10)),
-    #axis.title.y = element_text(margin = margin(r = 10)),
-    axis.title = element_text(size = 10)
-  )
-
-gm4 <- ggplot(data = dat_tempvar$raw) +
-  geom_point(
-    aes(x = env, y = abundance),
-    color = "pink3",
-    alpha = 0.5,
-    size = 2
-  ) +
-  geom_line(
-    aes(
-      x = env,
-      y = abundance,
-      group = site
-    ),
-    linewidth = 1.25,
-    color = "#333D79FF",
-    alpha = 0.75,
-    se = F,
-    method = "lm",
-    stat = "smooth"
-  ) +
-  labs(y = "Simulated Abundance", x = "Environmental Variable") +
-  #scale_y_continuous(breaks = seq(0, 125, 25), limits = c(0, 135)) +
-  theme(
-    legend.position = "none",
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
-    #axis.title.x = element_text(margin = margin(t = 10)),
-    #axis.title.y = element_text(margin = margin(r = 10)),
-    axis.title = element_text(size = 10)
-  )
+gm1 <- plot_univ(dat_sp1$raw)
+gm2 <- plot_univ(dat_temp1$raw)
+gm3 <- plot_univ(dat_sptemp1$raw)
+gm4 <- plot_univ(dat_tempvar1$raw)
+gm5 <- plot_univ(dat_sptempvar1$raw)
 
 gm1 +
   gm2 +
@@ -296,12 +260,27 @@ gm1 +
 
 #ggsave("fig1.pdf", width = 180, height = 90, units = "mm", dpi = 600)
 
+gm5 <- plot_univ(dat_sp2$raw)
+gm6 <- plot_univ(dat_temp2$raw)
+gm7 <- plot_univ(dat_sptemp2$raw)
+gm8 <- plot_univ(dat_tempvar2$raw)
+gm9 <- plot_univ(dat_sptempvar2$raw)
+
+gm5 +
+  gm6 +
+  gm7 +
+  gm8 +
+  plot_layout(axes = "collect") +
+  plot_annotation(tag_levels = "a")
+
+#ggsave("fig1.pdf", width = 180, height = 90, units = "mm", dpi = 600)
+
 # Variable Importance -----------------------------------------------------
 
-res_sim_sp <- ranger(
+res_sim_sp1 <- ranger(
   abundance ~ .,
   data = select(
-    dat_sp$dec,
+    dat_sp1$dec,
     -site,
     -time,
     -env,
@@ -310,13 +289,14 @@ res_sim_sp <- ranger(
     -env_rand3
   ),
   importance = "permutation",
-  mtry = 10
+  mtry = 10,
+  num.trees = 2000
 )
 
-res_sim_temp <- ranger(
+res_sim_sp2 <- ranger(
   abundance ~ .,
   data = select(
-    dat_temp$dec,
+    dat_sp2$dec,
     -site,
     -time,
     -env,
@@ -325,10 +305,59 @@ res_sim_temp <- ranger(
     -env_rand3
   ),
   importance = "permutation",
-  mtry = 10
+  mtry = 10,
+  num.trees = 2000
 )
 
-res_sim_sptemp <- ranger(
+res_sim_temp1 <- ranger(
+  abundance ~ .,
+  data = select(
+    dat_temp1$dec,
+    -site,
+    -time,
+    -env,
+    -env_rand1,
+    -env_rand2,
+    -env_rand3
+  ),
+  importance = "permutation",
+  mtry = 10,
+  num.trees = 2000
+)
+
+res_sim_temp2 <- ranger(
+  abundance ~ .,
+  data = select(
+    dat_temp2$dec,
+    -site,
+    -time,
+    -env,
+    -env_rand1,
+    -env_rand2,
+    -env_rand3
+  ),
+  importance = "permutation",
+  mtry = 10,
+  num.trees = 2000
+)
+
+res_sim_sptemp1 <- ranger(
+  abundance ~ .,
+  data = select(
+    dat_sptemp1$dec,
+    -site,
+    -time,
+    -env,
+    -env_rand1,
+    -env_rand2,
+    -env_rand3
+  ),
+  importance = "permutation",
+  mtry = 10,
+  num.trees = 2000
+)
+
+res_sim_sptemp2 <- ranger(
   abundance ~ .,
   data = select(
     dat_sptemp$dec,
@@ -340,13 +369,14 @@ res_sim_sptemp <- ranger(
     -env_rand3
   ),
   importance = "permutation",
-  mtry = 10
+  mtry = 10,
+  num.trees = 2000
 )
 
-res_sim_tempvar <- ranger(
+res_sim_tempvar1 <- ranger(
   abundance ~ .,
   data = select(
-    dat_tempvar$dec,
+    dat_tempvar2$dec,
     -site,
     -time,
     -env,
@@ -355,9 +385,57 @@ res_sim_tempvar <- ranger(
     -env_rand3
   ),
   importance = "permutation",
-  mtry = 10
+  mtry = 10,
+  num.trees = 2000
 )
 
+res_sim_tempvar2 <- ranger(
+  abundance ~ .,
+  data = select(
+    dat_tempvar2$dec,
+    -site,
+    -time,
+    -env,
+    -env_rand1,
+    -env_rand2,
+    -env_rand3
+  ),
+  importance = "permutation",
+  mtry = 10,
+  num.trees = 2000
+)
+
+res_sim_tempvar1 <- ranger(
+  abundance ~ .,
+  data = select(
+    dat_tempvar2$dec,
+    -site,
+    -time,
+    -env,
+    -env_rand1,
+    -env_rand2,
+    -env_rand3
+  ),
+  importance = "permutation",
+  mtry = 10,
+  num.trees = 2000
+)
+
+res_sim_tempvar2 <- ranger(
+  abundance ~ .,
+  data = select(
+    dat_tempvar2$dec,
+    -site,
+    -time,
+    -env,
+    -env_rand1,
+    -env_rand2,
+    -env_rand3
+  ),
+  importance = "permutation",
+  mtry = 10,
+  num.trees = 2000
+)
 plot_imp <- function(res, title) {
   var_imp <- res$variable.importance
   var_imp <- var_imp[order(var_imp, decreasing = T)][1:12]
@@ -388,221 +466,218 @@ plot_imp <- function(res, title) {
     )
 }
 
-plot_imp(res_sim_sp, title = "Spatial Response")
-plot_imp(res_sim_temp, title = "Fixed Temporal Response")
-plot_imp(res_sim_sptemp, title = "Spatio-Temporal Response")
-plot_imp(res_sim_tempvar, title = "Variable Temporal Response")
+plot_imp(res_sim_sp1, title = "Spatial Response")
+plot_imp(res_sim_temp1, title = "Fixed Temporal Response")
+plot_imp(res_sim_sptemp1, title = "Spatio-Temporal Response")
+plot_imp(res_sim_tempvar1, title = "Variable Temporal Response")
+
+plot_imp(res_sim_sp2, title = "Spatial Response")
+plot_imp(res_sim_temp2, title = "Fixed Temporal Response")
+plot_imp(res_sim_sptemp2, title = "Spatio-Temporal Response")
+plot_imp(res_sim_tempvar2, title = "Variable Temporal Response")
 
 
 # Test set predictions ----------------------------------------------------
 
-res_sim_sp <- ranger(
+# Spatial
+res_sim_sp1 <- ranger(
   abundance ~
     env_spatial + env_rand1_spatial + env_rand2_spatial + env_rand3_spatial,
-  data = m_train,
+  data = dat_sp1$dec,
   mtry = 3,
-  importance = "permutation"
-)
-pred_sim <- predict(res_sim_sp, data = m_test)
-
-m_test$pred <- pred_sim$predictions
-
-gm2 <- ggplot(data = m_test) +
-  geom_point(
-    aes(x = pred, y = abundance),
-    color = "pink3",
-    alpha = 0.5,
-    size = 2
-  ) +
-  geom_line(
-    aes(
-      x = pred,
-      y = abundance,
-      group = site
-    ),
-    linewidth = 1.25,
-    color = "#333D79FF",
-    alpha = 0.75,
-    se = F,
-    method = "lm",
-    stat = "smooth"
-  ) +
-  labs(y = "Simulated Abundance", x = "Predicted Abundance") +
-  #scale_y_continuous(breaks = seq(0, 125, 25), limits = c(0, 135)) +
-  theme(
-    legend.position = "none",
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
-    #axis.title.x = element_text(margin = margin(t = 10)),
-    #axis.title.y = element_text(margin = margin(r = 10)),
-    axis.title = element_text(size = 10)
-  )
-
-
-# Temporal effects --------------------------------------------------------
-
-a <- 10 + rnorm(20, 0, 10)
-b <- 10
-mu_x <- 1:20
-m_ab <- foreach(i = 1:length(a), .combine = "rbind") %do%
-  {
-    a[i] + b * mu_x
-  }
-m_ab <- data.frame(m_ab)
-colnames(m_ab) <- 1:20
-m_ab$site <- 1:20
-
-m_x <- matrix(rep(1:20, each = 20), ncol = 20, nrow = 20)
-m_x <- t(apply(m_x, 1, function(x) x + rnorm(1, 0, 2)))
-m_x <- data.frame(m_x)
-colnames(m_x) <- 1:20
-m_x$site <- 1:20
-
-m_ab <- pivot_longer(m_ab, !site, names_to = "time", values_to = "abundance")
-
-m_x <- pivot_longer(m_x, !site, names_to = "time", values_to = "env")
-m_x$env_rand1 <- rnorm(nrow(m_x), 0, 10)
-m_x$env_rand2 <- rnorm(nrow(m_x), 0, 10)
-m_x$env_rand3 <- rnorm(nrow(m_x), 0, 10)
-
-m <- left_join(m_ab, m_x, by = c("site", "time"))
-
-gm3 <- ggplot(data = m) +
-  geom_point(
-    aes(x = env, y = abundance),
-    color = "pink3",
-    alpha = 0.5,
-    size = 2
-  ) +
-  geom_line(
-    aes(
-      x = env,
-      y = abundance,
-      group = site
-    ),
-    linewidth = 1.25,
-    color = "#333D79FF",
-    alpha = 0.75,
-    se = F,
-    method = "lm",
-    stat = "smooth"
-  ) +
-  labs(y = "Simulated Abundance", x = "Environmental Variable") +
-  #scale_y_continuous(breaks = seq(0, 125, 25), limits = c(0, 135)) +
-  theme(
-    legend.position = "none",
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
-    #axis.title.x = element_text(margin = margin(t = 10)),
-    #axis.title.y = element_text(margin = margin(r = 10)),
-    axis.title = element_text(size = 10)
-  )
-
-# Create a test set
-m_ab_test <- lapply(mu_ab, function(x) rnorm(20, x, 10))
-m_ab_test <- do.call(rbind, m_ab_test)
-m_ab_test <- data.frame(m_ab_test)
-colnames(m_ab_test) <- 1:20
-m_ab_test$site <- 1:10
-
-m_x_test <- lapply(mu_x, function(x) rnorm(20, x, 2))
-m_x_test <- do.call(rbind, m_x_test)
-m_x_test <- data.frame(m_x_test)
-colnames(m_x_test) <- 1:20
-m_x_test$site <- 1:10
-
-m_ab_test <- pivot_longer(
-  m_ab_test,
-  !site,
-  names_to = "time",
-  values_to = "abundance"
+  num.trees = 2000
 )
 
-m_x_test <- pivot_longer(
-  m_x_test,
-  !site,
-  names_to = "time",
-  values_to = "env_spatial"
+dat_sp_test1 <- simulate_ab(response = "spatial")
+colnames(dat_sp_test1$raw)[-(1:3)] <- paste(
+  colnames(dat_sp_test1$raw)[-(1:3)],
+  "spatial",
+  sep = "_"
 )
-m_x_test$env_rand1_spatial <- rnorm(nrow(m_x_test), 0, 10)
-m_x_test$env_rand2_spatial <- rnorm(nrow(m_x_test), 0, 10)
-m_x_test$env_rand3_spatial <- rnorm(nrow(m_x_test), 0, 10)
+pred_sim1 <- predict(res_sim_sp1, data = dat_sp_test1$raw)
+dat_sp_test1$raw$pred <- pred_sim1$predictions
 
-m_test <- left_join(m_ab_test, m_x_test, by = c("site", "time"))
-m_test <- m_test %>%
-  dplyr::mutate(across(
-    all_of(
-      c(
-        "env_spatial",
-        "env_rand1_spatial",
-        "env_rand2_spatial",
-        "env_rand3_spatial"
-      )
-    ),
-    ~ scale(., scale = FALSE)[, 1]
-  ))
-
-# decompose simulated env data
-decomp_vars <- c("env", "env_rand1", "env_rand2", "env_rand3")
-m_train <- m %>%
-  # center without scaling
-  dplyr::mutate(across(all_of(decomp_vars), ~ scale(., scale = FALSE)[, 1])) %>%
-
-  # compute the spatial component
-  # (mean by pixel across all years of centered variables)
-  dplyr::group_by(site) %>%
-  dplyr::mutate(across(
-    all_of(decomp_vars),
-    ~ mean(., na.rm = TRUE),
-    .names = "{.col}_spatial"
-  )) %>%
-  dplyr::ungroup() %>%
-  # compute the temporal component
-  # (mean by year across all pixels of centered variables)
-  dplyr::group_by(time) %>%
-  dplyr::mutate(across(
-    all_of(decomp_vars),
-    ~ mean(., na.rm = TRUE),
-    .names = "{.col}_temporal"
-  )) %>%
-  dplyr::ungroup() %>%
-
-  # compute residual for each site i and year j as centered variable value
-  # i,j - spatial mean i - temporal mean j
-  dplyr::mutate(across(
-    all_of(decomp_vars),
-    ~ . -
-      get(paste0(cur_column(), "_spatial")) -
-      get(paste0(cur_column(), "_temporal")),
-    .names = "{.col}_residual"
-  )) %>%
-  dplyr::arrange(site, time)
-
-res_sim <- ranger(
-  abundance ~ .,
-  data = select(
-    m_train,
-    -site,
-    -time,
-    -env,
-    -env_rand1,
-    -env_rand2,
-    -env_rand3
-  ),
-  importance = "permutation",
-  mtry = 10
-)
-
-res_sim_sp <- ranger(
+res_sim_sp2 <- ranger(
   abundance ~
     env_spatial + env_rand1_spatial + env_rand2_spatial + env_rand3_spatial,
-  data = m_train,
+  data = dat_sp2$dec,
   mtry = 3,
-  importance = "permutation"
+  num.trees = 2000
 )
-pred_sim <- predict(res_sim_sp, data = m_test)
 
-m_test$pred <- pred_sim$predictions
-gm1 + gm2 + plot_layout(axes = "collect") + plot_annotation(tag_levels = "a")
+dat_sp_test2 <- simulate_ab(response = "spatial", t_x = seq(0, 9.5, 0.5))
+colnames(dat_sp_test2$raw)[-(1:3)] <- paste(
+  colnames(dat_sp_test2$raw)[-(1:3)],
+  "spatial",
+  sep = "_"
+)
+pred_sim2 <- predict(res_sim_sp2, data = dat_sp_test2$raw)
+dat_sp_test2$raw$pred <- pred_sim2$predictions
 
-ggsave("fig1.pdf", width = 180, height = 90, units = "mm", dpi = 600)
+# Fixed Temporal
+res_sim_temp1 <- ranger(
+  abundance ~
+    env_temporal + env_rand1_temporal + env_rand2_temporal + env_rand3_temporal,
+  data = dat_temp1$dec,
+  mtry = 3,
+  num.trees = 2000
+)
+
+dat_temp_test1 <- simulate_ab(response = "temporal-fixed")
+colnames(dat_temp_test1$raw)[-(1:3)] <- paste(
+  colnames(dat_temp_test1$raw)[-(1:3)],
+  "temporal",
+  sep = "_"
+)
+pred_sim1 <- predict(res_sim_temp1, data = dat_temp_test1$raw)
+dat_temp_test1$raw$pred <- pred_sim1$predictions
+
+res_sim_temp2 <- ranger(
+  abundance ~
+    env_temporal + env_rand1_temporal + env_rand2_temporal + env_rand3_temporal,
+  data = dat_temp2$dec,
+  mtry = 3,
+  num.trees = 2000
+)
+
+dat_temp_test2 <- simulate_ab(
+  response = "temporal-fixed",
+  t_x = seq(0, 9.5, 0.5)
+)
+colnames(dat_temp_test2$raw)[-(1:3)] <- paste(
+  colnames(dat_temp_test2$raw)[-(1:3)],
+  "temporal",
+  sep = "_"
+)
+pred_sim2 <- predict(res_sim_temp2, data = dat_temp_test2$raw)
+dat_temp_test2$raw$pred <- pred_sim2$predictions
+
+# Spatio-temporal
+res_sim_sptemp1 <- ranger(
+  abundance ~
+    env_temporal +
+      env_rand1_temporal +
+      env_rand2_temporal +
+      env_rand3_temporal +
+      env_spatial +
+      env_rand1_spatial +
+      env_rand2_spatial +
+      env_rand3_spatial,
+  data = dat_sptemp1$dec,
+  mtry = 3,
+  num.trees = 2000
+)
+
+dat_sptemp_test1 <- simulate_ab(response = "spatio-temporal")
+pred_sim1 <- predict(res_sim_sptemp1, data = dat_sptemp_test1$dec)
+dat_sptemp_test1$dec$pred <- pred_sim1$predictions
+
+res_sim_sptemp2 <- ranger(
+  abundance ~
+    env_temporal +
+      env_rand1_temporal +
+      env_rand2_temporal +
+      env_rand3_temporal +
+      env_spatial +
+      env_rand1_spatial +
+      env_rand2_spatial +
+      env_rand3_spatial,
+  data = dat_sptemp2$dec,
+  mtry = 3,
+  num.trees = 2000
+)
+
+dat_sptemp_test2 <- simulate_ab(
+  response = "spatio-temporal",
+  t_x = seq(0, 9.5, 0.5)
+)
+pred_sim2 <- predict(res_sim_sptemp2, data = dat_sptemp_test2$dec)
+dat_sptemp_test2$dec$pred <- pred_sim2$predictions
+
+# Variable temporal
+res_sim_tempvar1 <- ranger(
+  abundance ~
+    env_temporal +
+      env_rand1_temporal +
+      env_rand2_temporal +
+      env_rand3_temporal +
+      env_spatial +
+      env_rand1_spatial +
+      env_rand2_spatial +
+      env_rand3_spatial,
+  data = dat_tempvar1$dec,
+  mtry = 6,
+  num.trees = 2000
+)
+
+dat_tempvar_test1 <- simulate_ab(response = "temporal-variable")
+pred_sim1 <- predict(res_sim_tempvar1, data = dat_tempvar_test1$dec)
+dat_tempvar_test1$dec$pred <- pred_sim1$predictions
+
+res_sim_tempvar2 <- ranger(
+  abundance ~
+    env_temporal +
+      env_rand1_temporal +
+      env_rand2_temporal +
+      env_rand3_temporal +
+      env_spatial +
+      env_rand1_spatial +
+      env_rand2_spatial +
+      env_rand3_spatial,
+  data = dat_tempvar2$dec,
+  mtry = 6,
+  num.trees = 2000
+)
+
+dat_tempvar_test2 <- simulate_ab(
+  response = "temporal-variable",
+  t_x = seq(0, 9.5, 0.5)
+)
+pred_sim2 <- predict(res_sim_tempvar2, data = dat_tempvar_test2$dec)
+dat_tempvar_test2$dec$pred <- pred_sim2$predictions
+
+# Plots
+plot_test <- function(dat) {
+  ggplot(data = dat) +
+    geom_point(
+      aes(x = pred, y = abundance),
+      color = "pink3",
+      alpha = 0.5,
+      size = 2
+    ) +
+    geom_line(
+      aes(
+        x = pred,
+        y = abundance,
+        group = site
+      ),
+      linewidth = 1.25,
+      color = "#333D79FF",
+      alpha = 0.75,
+      se = F,
+      method = "lm",
+      stat = "smooth"
+    ) +
+    labs(y = "Simulated Abundance", x = "Predicted Abundance") +
+    #scale_y_continuous(breaks = seq(0, 125, 25), limits = c(0, 135)) +
+    theme(
+      legend.position = "none",
+      panel.grid.minor = element_blank(),
+      panel.border = element_blank(),
+      #axis.title.x = element_text(margin = margin(t = 10)),
+      #axis.title.y = element_text(margin = margin(r = 10)),
+      axis.title = element_text(size = 10)
+    )
+}
+
+plot_test(dat_sp_test1$raw)
+plot_test(dat_sp_test2$raw)
+
+plot_test(dat_temp_test1$raw)
+plot_test(dat_temp_test2$raw)
+
+plot_test(dat_sptemp_test1$dec)
+plot_test(dat_sptemp_test2$dec)
+
+plot_test(dat_tempvar_test1$dec)
+plot_test(dat_tempvar_test2$dec)
