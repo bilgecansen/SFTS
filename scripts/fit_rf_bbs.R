@@ -14,7 +14,7 @@ bbs_test <- filter(bbs, year >= 2011 & year < 2021)
 year_n <- bbs_train %>%
   group_by(species_id, site_id) %>%
   summarise(n = length(abundance[abundance > 0])) %>%
-  filter(n > 9)
+  filter(n > 4)
 
 idx_ss <- paste(year_n$species_id, year_n$site_id)
 bbs_train$species_site <- paste(bbs_train$species_id, bbs_train$site_id)
@@ -25,7 +25,7 @@ bbs_train2 <- filter(bbs_train, species_site %in% idx_ss)
 site_n <- bbs_train2 %>%
   group_by(species_id) %>%
   summarize(n = length(unique(site_id))) %>%
-  filter(n > 9)
+  filter(n > 4)
 
 bbs_train3 <- filter(bbs_train2, species_id %in% site_n$species_id)
 
@@ -315,7 +315,7 @@ g1 <- ggplot() +
     ),
     linewidth = 1.25,
     color = "#333D79FF",
-    alpha = 0.75,
+    alpha = 0.6,
     se = F,
     method = "lm",
     stat = "smooth"
@@ -340,9 +340,9 @@ g1 <- ggplot() +
 g2 <- ggplot() +
   geom_point(
     aes(
-      x = data_pred_r[[50]]$y_pred_sp,
-      y = data_pred_r[[50]]$y,
-      group = data_pred_r[[50]]$strata
+      x = data_pred_r[[52]]$y_pred_sp,
+      y = data_pred_r[[52]]$y,
+      group = data_pred_r[[52]]$strata
     ),
     color = "pink3",
     alpha = 0.5,
@@ -350,13 +350,13 @@ g2 <- ggplot() +
   ) +
   geom_line(
     aes(
-      x = data_pred_r[[50]]$y_pred_sp,
-      y = data_pred_r[[50]]$y,
-      group = data_pred_r[[50]]$strata
+      x = data_pred_r[[52]]$y_pred_sp,
+      y = data_pred_r[[52]]$y,
+      group = data_pred_r[[52]]$strata
     ),
     linewidth = 1.25,
     color = "#333D79FF",
-    alpha = 0.75,
+    alpha = 0.6,
     se = F,
     method = "lm",
     stat = "smooth"
@@ -397,7 +397,7 @@ g3 <- ggplot() +
     ),
     linewidth = 1.25,
     color = "#333D79FF",
-    alpha = 0.75,
+    alpha = 0.6,
     se = F,
     method = "lm",
     stat = "smooth"
@@ -422,9 +422,9 @@ g3 <- ggplot() +
 g4 <- ggplot() +
   geom_point(
     aes(
-      x = data_pred_r[[89]]$y_pred_sp,
-      y = data_pred_r[[89]]$y,
-      group = data_pred_r[[89]]$strata
+      x = data_pred_r[[17]]$y_pred_sp,
+      y = data_pred_r[[17]]$y,
+      group = data_pred_r[[17]]$strata
     ),
     color = "pink3",
     alpha = 0.5,
@@ -432,13 +432,13 @@ g4 <- ggplot() +
   ) +
   geom_line(
     aes(
-      x = data_pred_r[[89]]$y_pred_sp,
-      y = data_pred_r[[89]]$y,
-      group = data_pred_r[[89]]$strata
+      x = data_pred_r[[17]]$y_pred_sp,
+      y = data_pred_r[[17]]$y,
+      group = data_pred_r[[17]]$strata
     ),
     linewidth = 1.25,
     color = "#333D79FF",
-    alpha = 0.75,
+    alpha = 0.6,
     se = F,
     method = "lm",
     stat = "smooth"
@@ -446,7 +446,7 @@ g4 <- ggplot() +
   scale_y_continuous(limits = c(0, 1)) +
   scale_x_continuous(limits = c(0, 1)) +
   labs(
-    title = "Yellow-rumped Warbler",
+    title = "Northern Cardinal",
     y = "Observed Abudance (log)",
     x = "Predicted Abundance (log)"
   ) +
@@ -506,3 +506,271 @@ ggplot() +
   )
 
 ggsave("fig4.pdf", width = 140, height = 100, units = "mm", dpi = 600)
+
+# Poster plots
+ggplot() +
+  geom_jitter(
+    data = med_imp_str2,
+    aes(x = type, y = best_imp, color = type, ),
+    alpha = 0.60,
+    size = 4
+  ) +
+  labs(y = "Rank of Top Variable", x = "Variable Composition Type") +
+  scale_color_manual(
+    values = c(
+      "Residual" = "#2A3132",
+      "Spatial" = "#763626",
+      "Temporal" = "#90AFC5"
+    )
+  ) +
+  theme(
+    legend.position = "none",
+    plot.background = element_rect(fill = "#EADBCB"),
+    panel.background = element_rect(fill = "#EADBCB"),
+    text = element_text(color = "#2A3132"),
+    panel.grid.major.y = element_line(colour = "#2A3132", linetype = 3),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.border = element_blank(),
+    axis.title.x = element_text(margin = margin(t = 10)),
+    axis.title.y = element_text(margin = margin(r = 10)),
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 16)
+  )
+
+ggsave("poster_fig1.jpeg", width = 180, height = 140, units = "mm", dpi = 600)
+ggsave("poster_fig1.svg", width = 180, height = 140, units = "mm", dpi = 600)
+
+gp1 <- ggplot() +
+  geom_point(
+    aes(
+      x = data_pred_r[[32]]$y_pred_sp,
+      y = data_pred_r[[32]]$y,
+      group = data_pred_r[[32]]$strata
+    ),
+    color = "#763626",
+    alpha = 0.5,
+    size = 2
+  ) +
+  geom_line(
+    aes(
+      x = data_pred_r[[32]]$y_pred_sp,
+      y = data_pred_r[[32]]$y,
+      group = data_pred_r[[32]]$strata
+    ),
+    linewidth = 1.25,
+    color = "#90AFC5",
+    alpha = 0.5,
+    se = F,
+    method = "lm",
+    stat = "smooth"
+  ) +
+  #scale_y_continuous(limits = c(0, 1)) +
+  #scale_x_continuous(limits = c(0, 1)) +
+  labs(
+    title = "American Robin",
+    y = "Observed Abudance",
+    x = "Predicted Abundance"
+  ) +
+  theme(
+    plot.background = element_rect(fill = "#EADBCB"),
+    panel.background = element_rect(fill = "#EADBCB"),
+    text = element_text(color = "#2A3132"),
+    panel.grid.major = element_line(colour = "#2A3132", linetype = 3),
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.title.x = element_text(margin = margin(t = 20)),
+    axis.title.y = element_text(margin = margin(r = 20)),
+    axis.title = element_text(size = 18),
+    plot.title = element_text(hjust = 0.5),
+    axis.text = element_text(size = 16)
+  )
+
+gp2 <- ggplot() +
+  geom_point(
+    aes(
+      x = data_pred_r[[52]]$y_pred_sp,
+      y = data_pred_r[[52]]$y,
+      group = data_pred_r[[52]]$strata
+    ),
+    color = "#763626",
+    alpha = 0.5,
+    size = 2
+  ) +
+  geom_line(
+    aes(
+      x = data_pred_r[[52]]$y_pred_sp,
+      y = data_pred_r[[52]]$y,
+      group = data_pred_r[[52]]$strata
+    ),
+    linewidth = 1.25,
+    color = "#90AFC5",
+    alpha = 0.5,
+    se = F,
+    method = "lm",
+    stat = "smooth"
+  ) +
+  #scale_y_continuous(limits = c(0, 1)) +
+  #scale_x_continuous(limits = c(0, 1)) +
+  labs(
+    title = "Western Meadowlark",
+    y = "Observed Abudance",
+    x = "Predicted Abundance"
+  ) +
+  theme(
+    plot.background = element_rect(fill = "#EADBCB"),
+    panel.background = element_rect(fill = "#EADBCB"),
+    text = element_text(color = "#2A3132"),
+    panel.grid.major = element_line(colour = "#2A3132", linetype = 3),
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.title.x = element_text(margin = margin(t = 20)),
+    axis.title.y = element_text(margin = margin(r = 20)),
+    axis.title = element_text(size = 18),
+    plot.title = element_text(hjust = 0.5),
+    axis.text = element_text(size = 16)
+  )
+
+gp3 <- ggplot() +
+  geom_point(
+    aes(
+      x = data_pred_r[[26]]$y_pred_sp,
+      y = data_pred_r[[26]]$y,
+      group = data_pred_r[[26]]$strata
+    ),
+    color = "#763626",
+    alpha = 0.5,
+    size = 2
+  ) +
+  geom_line(
+    aes(
+      x = data_pred_r[[26]]$y_pred_sp,
+      y = data_pred_r[[26]]$y,
+      group = data_pred_r[[26]]$strata
+    ),
+    linewidth = 1.25,
+    color = "#90AFC5",
+    alpha = 0.5,
+    se = F,
+    method = "lm",
+    stat = "smooth"
+  ) +
+  #scale_y_continuous(limits = c(0, 1)) +
+  #scale_x_continuous(limits = c(0, 1)) +
+  labs(
+    title = "Northern Mockingbird",
+    y = "Observed Abudance",
+    x = "Predicted Abundance"
+  ) +
+  theme(
+    plot.background = element_rect(fill = "#EADBCB"),
+    panel.background = element_rect(fill = "#EADBCB"),
+    text = element_text(color = "#2A3132"),
+    panel.grid.major = element_line(colour = "#2A3132", linetype = 3),
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.title.x = element_text(margin = margin(t = 20)),
+    axis.title.y = element_text(margin = margin(r = 20)),
+    axis.title = element_text(size = 18),
+    plot.title = element_text(hjust = 0.5),
+    axis.text = element_text(size = 16)
+  )
+
+gp4 <- ggplot() +
+  geom_point(
+    aes(
+      x = data_pred_r[[17]]$y_pred_sp,
+      y = data_pred_r[[17]]$y,
+      group = data_pred_r[[17]]$strata
+    ),
+    color = "#763626",
+    alpha = 0.5,
+    size = 2
+  ) +
+  geom_line(
+    aes(
+      x = data_pred_r[[17]]$y_pred_sp,
+      y = data_pred_r[[17]]$y,
+      group = data_pred_r[[17]]$strata
+    ),
+    linewidth = 1.25,
+    color = "#90AFC5",
+    alpha = 0.5,
+    se = F,
+    method = "lm",
+    stat = "smooth"
+  ) +
+  #scale_y_continuous(limits = c(0, 1)) +
+  #scale_x_continuous(limits = c(0, 1)) +
+  labs(
+    title = "Northern Cardinal",
+    y = "Observed Abudance",
+    x = "Predicted Abundance"
+  ) +
+  theme(
+    plot.background = element_rect(fill = "#EADBCB"),
+    panel.background = element_rect(fill = "#EADBCB"),
+    text = element_text(color = "#2A3132"),
+    panel.grid.major = element_line(colour = "#2A3132", linetype = 3),
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.title.x = element_text(margin = margin(t = 20)),
+    axis.title.y = element_text(margin = margin(r = 20)),
+    axis.title = element_text(size = 18),
+    plot.title = element_text(hjust = 0.5),
+    axis.text = element_text(size = 16)
+  )
+
+gp1 +
+  gp2 +
+  gp3 +
+  gp4 +
+  plot_layout(axis_titles = "collect") +
+  plot_annotation(tag_levels = "a") &
+  theme(plot.tag.position = "topright")
+
+ggsave("poster_fig2al.svg", width = 180, height = 140, units = "mm", dpi = 600)
+
+ggplot() +
+  geom_point(
+    aes(x = cor_all$r, y = cor_temp$r),
+    color = "#763626",
+    #alpha = 0.75,
+    size = 4
+  ) +
+  labs(y = "Median Temporal Correlation", x = "Spatiotemporal Correlation") +
+  theme(
+    plot.background = element_rect(fill = "#EADBCB"),
+    panel.background = element_rect(fill = "#EADBCB"),
+    text = element_text(color = "#2A3132"),
+    panel.grid.major = element_line(colour = "#2A3132", linetype = 3),
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.title.x = element_text(margin = margin(t = 10)),
+    axis.title.y = element_text(margin = margin(r = 10)),
+    axis.title = element_text(size = 18),
+    plot.title = element_text(hjust = 0.5),
+    axis.text = element_text(size = 16)
+  )
+
+ggsave("poster_fig3.svg", width = 180, height = 140, units = "mm", dpi = 600)
+
+map1 <- load_map(stratify_by = "bbs_usgs") %>%
+  filter(str_detect(strata_name, "US")) %>%
+  filter(!str_detect(strata_name, "AK"))
+
+ggplot(data = map1) +
+  geom_sf(fill = "#763626", col = "#2A3132", linewidth = 1.5, alpha = 0.9) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    panel.grid = element_blank()
+  )
+
+ggsave("poster_map1.svg", width = 180, height = 140, units = "mm", dpi = 600)
