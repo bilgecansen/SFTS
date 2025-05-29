@@ -261,12 +261,13 @@ med_imp_fam1 <- foreach(i = 1:length(var_imp_fam_sel), .combine = "rbind") %do%
     )
   }
 
-ggplot() +
+g1 <- ggplot() +
   geom_jitter(
     data = med_imp_fam1,
     aes(x = type, y = best_imp),
-    color = "#333D79FF",
-    alpha = 0.5
+    color = "#90AFC5",
+    alpha = 0.9,
+    size = 2
   ) +
   labs(y = "Rank of Top Variable", x = "Variable Composition Type") +
   theme(
@@ -278,6 +279,7 @@ ggplot() +
     axis.title = element_text(size = 10)
   )
 
+#ggsave("fig_dbo2.pdf", width = 90, height = 90, units = "mm", dpi = 600)
 
 # Cross-validation with space only models ---------------------------------
 
@@ -325,7 +327,7 @@ data_pred_r <- foreach(i = 1:length(families_sp)) %do%
         )
 
         res_rf_sp <- ranger(
-          biomass ~ .,
+          log(biomass) ~ .,
           data = dat_train,
           num.trees = 2000
         )
@@ -335,15 +337,15 @@ data_pred_r <- foreach(i = 1:length(families_sp)) %do%
           data = select(dat_test, -StationNme, -DataYear)
         )
 
-        y_pred <- (y_pred$predictions -
-          min(dat_train$biomass)) /
-          (max(dat_train$biomass) -
-            min(dat_train$biomass))
+        y_pred <- (y_pred$predictions) #-
+        #min(dat_train$biomass)) /
+        #(max(dat_train$biomass) -
+        #min(dat_train$biomass))
 
-        y <- (dat_test$biomass -
-          min(dat_train$biomass)) /
-          (max(dat_train$biomass) -
-            min(dat_train$biomass))
+        y <- (log(dat_test$biomass)) #-
+        #min(dat_train$biomass)) /
+        #(max(dat_train$biomass) -
+        #min(dat_train$biomass))
 
         data.frame(
           y_pred = y_pred,
@@ -356,96 +358,106 @@ data_pred_r <- foreach(i = 1:length(families_sp)) %do%
   }
 
 pred_r <- map_dbl(data_pred_r, function(x) cor(x$y_pred, x$y))
-idx_pred <- which(pred_r > 0.5)
-data_pred_r <- data_pred_r[idx_pred]
-pred_r <- pred_r[idx_pred]
-families_sp_sel <- families_sp[idx_pred]
+#idx_pred <- which(pred_r > 0.5)
+#data_pred_r <- data_pred_r[idx_pred]
+#pred_r <- pred_r[idx_pred]
+#families_sp_sel <- families_sp[idx_pred]
 
-order(pred_r, decreasing = T)[1:11]
-
-for (i in 1:11) {
-  print(
-    ggplot() +
-      geom_point(
-        aes(
-          x = data_pred_r[[i]]$y_pred,
-          y = data_pred_r[[i]]$y,
-          group = data_pred_r[[i]]$site
-        ),
-        color = "pink3",
-        alpha = 0.5,
-        size = 2
-      ) +
-      geom_line(
-        aes(
-          x = data_pred_r[[i]]$y_pred,
-          y = data_pred_r[[i]]$y,
-          group = data_pred_r[[i]]$site
-        ),
-        linewidth = 1.25,
-        color = "#333D79FF",
-        alpha = 0.75,
-        se = F,
-        method = "lm",
-        stat = "smooth"
-      ) +
-      #scale_y_continuous(limits = c(0, 1)) +
-      #scale_x_continuous(limits = c(0, 1)) +
-      labs(
-        #title = "American Robin",
-        y = "Observed Biomass",
-        x = "Predicted Biomass"
-      ) +
-      theme(
-        legend.position = "none",
-        panel.grid.minor = element_blank(),
-        panel.border = element_blank(),
-        axis.title.x = element_text(margin = margin(t = 10)),
-        axis.title.y = element_text(margin = margin(r = 10)),
-        axis.title = element_text(size = 10),
-        plot.title = element_text(hjust = 0.5)
-      )
-  )
+plot_pred <- function(i) {
+  ggplot() +
+    geom_point(
+      aes(
+        x = data_pred_r[[i]]$y_pred,
+        y = data_pred_r[[i]]$y,
+        group = data_pred_r[[i]]$site
+      ),
+      color = "pink3",
+      alpha = 0.5,
+      size = 2
+    ) +
+    geom_line(
+      aes(
+        x = data_pred_r[[i]]$y_pred,
+        y = data_pred_r[[i]]$y,
+        group = data_pred_r[[i]]$site
+      ),
+      linewidth = 1.25,
+      color = "#333D79FF",
+      alpha = 0.75,
+      se = F,
+      method = "lm",
+      stat = "smooth"
+    ) +
+    #scale_y_continuous(limits = c(0, 1)) +
+    #scale_x_continuous(limits = c(0, 1)) +
+    labs(
+      #title = "American Robin",
+      y = "Observed Biomass",
+      x = "Predicted Biomass"
+    ) +
+    theme(
+      legend.position = "none",
+      panel.grid.minor = element_blank(),
+      panel.border = element_blank(),
+      axis.title.x = element_text(margin = margin(t = 10)),
+      axis.title.y = element_text(margin = margin(r = 10)),
+      axis.title = element_text(size = 10),
+      plot.title = element_text(hjust = 0.5)
+    )
 }
 
+order(pred_r, decreasing = T)
 
-g1 <- ggplot() +
-  geom_point(
-    aes(
-      x = data_pred_r[[5]]$y_pred,
-      y = data_pred_r[[5]]$y,
-      group = data_pred_r[[5]]$site
-    ),
-    color = "pink3",
-    alpha = 0.5,
+#for(i in 1:41) print(plot_pred(i))
+
+#plot_pred(11)
+g2 <- plot_pred(27)
+#plot_pred(13)
+
+# Correlation comparison
+data_pred_r2 <- do.call(rbind, data_pred_r)
+data_pred_r2$gr <- paste(
+  data_pred_r2$species_id,
+  data_pred_r2$site,
+  sep = "-"
+)
+
+cor_temp <- data_pred_r2 %>%
+  group_by(species_id, site) %>%
+  summarise(r = cor(y, y_pred)) %>%
+  ungroup() %>%
+  group_by(species_id) %>%
+  summarise(r = median(r[!is.na(r)]))
+
+cor_all <- data_pred_r2 %>%
+  group_by(species_id) %>%
+  summarise(r = cor(y, y_pred))
+
+dat_cor <- data.frame(
+  r = c(cor_all$r, cor_temp$r),
+  type = rep(
+    c("Spatio-temporal", "Temporal"),
+    each = length(cor_all$r)
+  )
+)
+
+g3 <- ggplot(dat_cor) +
+  geom_jitter(
+    aes(x = type, y = r),
+    color = "#763626",
+    alpha = 0.9,
     size = 2
   ) +
-  geom_line(
-    aes(
-      x = data_pred_r[[5]]$y_pred,
-      y = data_pred_r[[5]]$y,
-      group = data_pred_r[[5]]$site
-    ),
-    linewidth = 1.25,
-    color = "#333D79FF",
-    alpha = 0.75,
-    se = F,
-    method = "lm",
-    stat = "smooth"
-  ) +
-  #scale_y_continuous(limits = c(0, 1)) +
-  #scale_x_continuous(limits = c(0, 1)) +
-  labs(
-    #title = "American Robin",
-    y = "Observed Biomass",
-    x = "Predicted Biomass"
-  ) +
+  labs(y = "Prediction Correlation", x = "Prediction Type") +
   theme(
-    legend.position = "none",
     panel.grid.minor = element_blank(),
     panel.border = element_blank(),
-    axis.title.x = element_text(margin = margin(t = 10)),
-    axis.title.y = element_text(margin = margin(r = 10)),
-    axis.title = element_text(size = 10),
-    plot.title = element_text(hjust = 0.5)
+    #axis.title.x = element_text(margin = margin(t = 10)),
+    #axis.title.y = element_text(margin = margin(r = 10)),
+    axis.title = element_text(size = 10)
   )
+
+#ggsave("fig_dbo1.pdf", width = 90, height = 90, units = "mm", dpi = 600)
+
+plots_benthic <- list(g1 = g1, g2 = g2, g3 = g3)
+saveRDS(plots_benthic, "plots_benthic.rds")
