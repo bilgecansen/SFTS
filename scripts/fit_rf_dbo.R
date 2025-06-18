@@ -144,13 +144,6 @@ data_fam_gc3 <- filter(data_fam_gc2, family %in% site_n$family) %>%
 idx0 <- which(data_fam_gc3$biomass == 0)
 data_fam_gc4 <- data_fam_gc3[-idx0, ]
 
-# add sic and per data
-data_env_sel <- left_join(
-  data_env_sel,
-  data_per,
-  by = c("StationNme", "DataYear")
-)
-
 # decompose data for RF
 ## these covariates vary across space and time and we should decompose them
 decomp_vars <- colnames(data_env_sel)[-(1:10)]
@@ -416,9 +409,9 @@ order(pred_r, decreasing = T)
 for (i in 1:length(pred_r)) print(plot_pred(i))
 
 #plot_pred(11)
-g2 <- plot_pred(14)
-g3 <- plot_pred(51)
-g4 <- plot_pred(46)
+g2 <- plot_pred(61)
+g3 <- plot_pred(10)
+g4 <- plot_pred(14)
 
 # Correlation comparison
 data_pred_r2 <- do.call(rbind, data_pred_r)

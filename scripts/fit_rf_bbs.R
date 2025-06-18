@@ -91,7 +91,7 @@ for (i in 1:length(data_rf_str)) {
   res_rf <- ranger(
     log(abundance) ~ .,
     data = data_rf_str[[i]],
-    num.trees = 500,
+    num.trees = 2000,
     importance = "permutation"
   )
 
@@ -179,7 +179,7 @@ for (i in 1:length(data_rf_sp)) {
   res_rf_sp[[i]] <- ranger(
     log(abundance) ~ .,
     data = data_rf_sp[[i]],
-    num.trees = 500
+    num.trees = 2000
   )
 
   R2_sp[i] <- res_rf_sp[[i]]$r.squared
@@ -247,7 +247,7 @@ pred_r <- map_dbl(data_pred_r, function(x) cor(x$y_pred_sp, x$y))
 
 order(pred_r, decreasing = T)[1:10]
 
-g1 <- ggplot(data_pred_r[[195]]) +
+g1 <- ggplot(data_pred_r[[47]]) +
   geom_point(
     aes(
       x = y_pred_sp,
@@ -290,11 +290,6 @@ g1 <- ggplot(data_pred_r[[195]]) +
 
 # Correlation comparison
 data_pred_r2 <- do.call(rbind, data_pred_r)
-#data_pred_r3$gr <- paste(
-#data_pred_r3$species_id,
-#data_pred_r3$strata,
-#sep = "-"
-#)
 
 cor_temp <- data_pred_r2 %>%
   group_by(species_id, strata) %>%
@@ -308,10 +303,10 @@ cor_sptemp <- data_pred_r2 %>%
   summarise(r = cor(y, y_pred_sp))
 
 dat_cor <- data.frame(
-  r = c(cor_all$r, cor_temp$r),
+  r = c(cor_sptemp$r, cor_temp$r),
   type = rep(
     c("Spatio-temporal", "Temporal"),
-    each = length(cor_all$r)
+    each = length(cor_sptemp$r)
   )
 )
 
