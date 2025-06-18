@@ -3,6 +3,7 @@ library(readxl)
 library(foreach)
 library(patchwork)
 library(ranger)
+library(ggbeeswarm)
 
 theme_set(theme_bw())
 
@@ -41,9 +42,6 @@ data_env$NiTriTra <- as.numeric(data_env$NiTriTra)
 data_env$Ammonia <- as.numeric(data_env$Ammonia)
 data_env$Phosphate <- as.numeric(data_env$Phosphate)
 data_env$Silicate <- as.numeric(data_env$Silicate)
-
-# Sea ice persistence
-data_per <- readRDS("data/data_sic_per.rds")
 
 # Family biomass data
 data_fam <- readRDS("data/data_family_bio.rds")
@@ -257,17 +255,23 @@ med_imp_fam1 <- foreach(i = 1:length(var_imp_fam_sel), .combine = "rbind") %do%
         min(str_which(names(z), "temporal")),
         min(str_which(names(z), "residual"))
       ),
-      type = c("spatial", "temporal", "residual")
+      type = c("Spatial", "Temporal", "Residual")
     )
   }
 
-g1 <- ggplot() +
-  geom_jitter(
-    data = med_imp_fam1,
-    aes(x = type, y = best_imp),
-    color = "#90AFC5",
-    alpha = 0.9,
+g1 <- ggplot(med_imp_fam1) +
+  geom_violin(aes(x = type, y = best_imp), linewidth = 1.5, scale = "width") +
+  geom_quasirandom(
+    aes(x = type, y = best_imp + rnorm(length(best_imp), 0, 0.5), color = type),
+    alpha = 0.5,
     size = 2
+  ) +
+  scale_color_manual(
+    values = c(
+      "Residual" = "#2A3132",
+      "Spatial" = "#763626",
+      "Temporal" = "#90AFC5"
+    )
   ) +
   labs(y = "Rank of Top Variable", x = "Variable Composition Type") +
   theme(
@@ -283,7 +287,7 @@ g1 <- ggplot() +
 
 # Cross-validation with space only models ---------------------------------
 
-families_sp <- families[which(R2_fam >= 0.25)]
+#families_sp <- families[which(R2_fam >= 0.25)]
 
 data_rf_sp <- map(
   data_rf,
@@ -293,19 +297,19 @@ data_rf_sp <- map(
       DataYear,
       StationNme,
       biomass,
-      DBOreg,
-      Latitude,
-      Longitude,
+      #DBOreg,
+      #Latitude,
+      #Longitude,
       Depth,
       contains("spatial")
     )
 )
 
-data_rf_sp <- data_rf_sp[which(R2_fam >= 0.25)]
-data_rf_test <- data_rf[which(R2_fam >= 0.25)]
+#data_rf_sp <- data_rf_sp[which(R2_fam >= 0.25)]
+data_rf_test <- data_rf
 
 # Predictions with SFTS
-data_pred_r <- foreach(i = 1:length(families_sp)) %do%
+data_pred_r <- foreach(i = 1:length(families)) %do%
   {
     years <- unique(data_rf_sp[[i]]$DataYear)
 
@@ -337,20 +341,20 @@ data_pred_r <- foreach(i = 1:length(families_sp)) %do%
           data = select(dat_test, -StationNme, -DataYear)
         )
 
-        y_pred <- (y_pred$predictions) #-
-        #min(dat_train$biomass)) /
-        #(max(dat_train$biomass) -
-        #min(dat_train$biomass))
+        y_pred <- ((y_pred$predictions) -
+          min(log(dat_train$biomass))) /
+          (max(log(dat_train$biomass)) -
+            min(log(dat_train$biomass)))
 
-        y <- (log(dat_test$biomass)) #-
-        #min(dat_train$biomass)) /
-        #(max(dat_train$biomass) -
-        #min(dat_train$biomass))
+        y <- ((log(dat_test$biomass)) -
+          min(log(dat_train$biomass))) /
+          (max(log(dat_train$biomass)) -
+            min(log(dat_train$biomass)))
 
         data.frame(
           y_pred = y_pred,
           y = y,
-          species_id = families_sp[i],
+          species_id = families[i],
           site = dat_test$StationNme,
           year = dat_test$DataYear
         )
@@ -361,28 +365,29 @@ pred_r <- map_dbl(data_pred_r, function(x) cor(x$y_pred, x$y))
 #idx_pred <- which(pred_r > 0.5)
 #data_pred_r <- data_pred_r[idx_pred]
 #pred_r <- pred_r[idx_pred]
-#families_sp_sel <- families_sp[idx_pred]
+#families_sp_sel <- families[idx_pred]
 
 plot_pred <- function(i) {
-  ggplot() +
+  ggplot(data_pred_r[[i]]) +
     geom_point(
       aes(
-        x = data_pred_r[[i]]$y_pred,
-        y = data_pred_r[[i]]$y,
-        group = data_pred_r[[i]]$site
+        x = y_pred,
+        y = y,
+        group = site
       ),
-      color = "pink3",
+      color = "#763626",
+      ,
       alpha = 0.5,
       size = 2
     ) +
     geom_line(
       aes(
-        x = data_pred_r[[i]]$y_pred,
-        y = data_pred_r[[i]]$y,
-        group = data_pred_r[[i]]$site
+        x = y_pred,
+        y = y,
+        group = site
       ),
       linewidth = 1.25,
-      color = "#333D79FF",
+      color = "#90AFC5",
       alpha = 0.75,
       se = F,
       method = "lm",
@@ -391,7 +396,7 @@ plot_pred <- function(i) {
     #scale_y_continuous(limits = c(0, 1)) +
     #scale_x_continuous(limits = c(0, 1)) +
     labs(
-      #title = "American Robin",
+      title = families[i],
       y = "Observed Biomass",
       x = "Predicted Biomass"
     ) +
@@ -408,19 +413,15 @@ plot_pred <- function(i) {
 
 order(pred_r, decreasing = T)
 
-#for(i in 1:41) print(plot_pred(i))
+for (i in 1:length(pred_r)) print(plot_pred(i))
 
 #plot_pred(11)
-g2 <- plot_pred(27)
-#plot_pred(13)
+g2 <- plot_pred(14)
+g3 <- plot_pred(51)
+g4 <- plot_pred(46)
 
 # Correlation comparison
 data_pred_r2 <- do.call(rbind, data_pred_r)
-data_pred_r2$gr <- paste(
-  data_pred_r2$species_id,
-  data_pred_r2$site,
-  sep = "-"
-)
 
 cor_temp <- data_pred_r2 %>%
   group_by(species_id, site) %>%
@@ -441,12 +442,14 @@ dat_cor <- data.frame(
   )
 )
 
-g3 <- ggplot(dat_cor) +
-  geom_jitter(
-    aes(x = type, y = r),
-    color = "#763626",
-    alpha = 0.9,
-    size = 2
+g5 <- ggplot(dat_cor) +
+  geom_violin(aes(x = type, y = r), linewidth = 1.5) +
+  geom_quasirandom(aes(x = type, y = r, color = type), alpha = 0.5, size = 2) +
+  scale_color_manual(
+    values = c(
+      "Spatio-temporal" = "#763626",
+      "Temporal" = "#90AFC5"
+    )
   ) +
   labs(y = "Prediction Correlation", x = "Prediction Type") +
   theme(
@@ -459,5 +462,5 @@ g3 <- ggplot(dat_cor) +
 
 #ggsave("fig_dbo1.pdf", width = 90, height = 90, units = "mm", dpi = 600)
 
-plots_benthic <- list(g1 = g1, g2 = g2, g3 = g3)
-saveRDS(plots_benthic, "plots_benthic.rds")
+plots_dbo <- list(g1 = g1, g2 = g2, g3 = g3, g4 = g4, g5 = g5)
+saveRDS(plots_dbo, "plots_dbo.rds")

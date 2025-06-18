@@ -364,7 +364,7 @@ plot_imp <- function(res, title) {
   ggplot() +
     geom_segment(
       aes(y = names_imp, x = 0, xend = var_imp[12:1]),
-      color = "#90AFC5",
+      color = "#2A3132",
       linewidth = 1.1
     ) +
     labs(
@@ -617,17 +617,32 @@ med_imp_uneven <- foreach(i = 1:length(varimp_uneven)) %:%
 
 g_imp_equal_multi <- foreach(i = 1:length(scenarios)) %do%
   {
-    ggplot() +
-      geom_jitter(
-        data = med_imp_equal[[i]],
+    ggplot(med_imp_equal[[i]]) +
+      geom_violin(
         aes(x = type, y = best_imp),
-        color = "#90AFC5",
-        alpha = 0.5
+        linewidth = 1.5,
+        scale = "width"
+      ) +
+      geom_quasirandom(
+        aes(
+          x = type,
+          y = best_imp + rnorm(length(best_imp), 0, 0.1),
+          color = type
+        ),
+        alpha = 0.5,
+        size = 2
       ) +
       labs(
         y = "Rank of Top Variable",
         x = "Variable Composition Type",
         title = titles[i]
+      ) +
+      scale_color_manual(
+        values = c(
+          "Residual" = "#2A3132",
+          "Spatial" = "#763626",
+          "Temporal" = "#90AFC5"
+        )
       ) +
       theme(
         panel.grid.minor = element_blank(),
@@ -643,17 +658,32 @@ names(g_imp_equal_multi) <- scenarios
 
 g_imp_uneven_multi <- foreach(i = 1:length(scenarios)) %do%
   {
-    ggplot() +
-      geom_jitter(
-        data = med_imp_uneven[[i]],
+    ggplot(med_imp_uneven[[i]]) +
+      geom_violin(
         aes(x = type, y = best_imp),
-        color = "#90AFC5",
-        alpha = 0.5
+        linewidth = 1.5,
+        scale = "width"
+      ) +
+      geom_quasirandom(
+        aes(
+          x = type,
+          y = best_imp + rnorm(length(best_imp), 0, 0.1),
+          color = type
+        ),
+        alpha = 0.5,
+        size = 2
       ) +
       labs(
         y = "Rank of Top Variable",
         x = "Variable Composition Type",
         title = titles[i]
+      ) +
+      scale_color_manual(
+        values = c(
+          "Residual" = "#2A3132",
+          "Spatial" = "#763626",
+          "Temporal" = "#90AFC5"
+        )
       ) +
       theme(
         panel.grid.minor = element_blank(),
@@ -741,15 +771,22 @@ plot_pred <- function(dat) {
   )
 
   ggplot(dat_cor) +
-    geom_jitter(
-      aes(x = type, y = r),
-      color = "#763626",
-      alpha = 0.5
+    geom_violin(aes(x = type, y = r), linewidth = 1.5, scale = "width") +
+    geom_quasirandom(
+      aes(x = type, y = r, color = type),
+      alpha = 0.5,
+      size = 2
     ) +
     labs(
       y = "Prediction Correlation",
       x = "Prediction Type",
       title = titles[i]
+    ) +
+    scale_color_manual(
+      values = c(
+        "Spatio-temporal" = "#763626",
+        "Temporal" = "#90AFC5"
+      )
     ) +
     theme(
       panel.grid.minor = element_blank(),

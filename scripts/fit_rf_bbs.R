@@ -2,6 +2,7 @@ library(tidyverse)
 library(ranger)
 library(foreach)
 library(patchwork)
+library(ggbeeswarm)
 
 theme_set(theme_bw())
 
@@ -51,15 +52,26 @@ data_rf_str <- foreach(i = 1:length(species)) %do%
         lat,
         long,
         party_hours,
-        amo,
-        amo_lag,
-        enso,
-        enso_lag,
-        nao,
-        nao_lag,
-        pdo,
-        pdo_lag,
-        contains(c("spatial", "temporal", "residual")),
+        contains(c(
+          "bio2",
+          "bio3",
+          "bio5",
+          "bio8",
+          "bio9",
+          "bio15",
+          "bio16",
+          "bio18"
+        )),
+        -ends_with(c(
+          "bio2",
+          "bio3",
+          "bio5",
+          "bio8",
+          "bio9",
+          "bio15",
+          "bio16",
+          "bio18"
+        )),
         -contains("lag_spatial"),
         strata
       )
@@ -91,51 +103,6 @@ for (i in 1:length(data_rf_str)) {
 
 hist(R2_str)
 var_imp_str_sel <- var_imp_str[which(R2_str >= 0.25)]
-dat_imp <- var_imp_str_sel[[1]][order(var_imp_str_sel[[1]], decreasing = T)][
-  1:40
-]
-names_imp <- factor(names(dat_imp)[40:1], levels = names(dat_imp)[40:1])
-
-g_imp1 <- ggplot() +
-  geom_segment(
-    aes(y = names_imp, x = 0, xend = dat_imp[40:1]),
-    color = "#333D79FF",
-    linewidth = 1.1
-  ) +
-  labs(
-    title = "Northern Bobwhite",
-    y = "Variables",
-    x = "Permutation Importance"
-  ) +
-  theme(
-    panel.grid.minor = element_blank(),
-    panel.grid.major = element_blank(),
-    panel.border = element_blank(),
-    #axis.title.x = element_text(margin = margin(t = 10)),
-    #axis.title.y = element_text(margin = margin(r = 10)),
-    axis.title = element_text(size = 10),
-    axis.text = element_text(size = 8)
-  )
-
-med_imp_str1 <- foreach(i = 1:length(var_imp_str_sel), .combine = "rbind") %do%
-  {
-    z <- var_imp_str_sel[[i]][order(var_imp_str_sel[[i]], decreasing = T)]
-
-    data.frame(
-      best_imp = c(
-        min(str_which(names(z), "spatial")),
-        min(str_which(names(z), "temporal")),
-        min(str_which(names(z), "residual")),
-        min(str_which(names(z), "amo")),
-        min(str_which(names(z), "enso")),
-        min(str_which(names(z), "nao")),
-        min(str_which(names(z), "pdo"))
-      ),
-      #median(str_which(names(z), "party_hours"))),
-      type = c("spatial", "temporal", "residual", "amo", "enso", "nao", "pdo")
-    ) #, "elevs",
-    #"lat", "lon", "party_hours"))
-  }
 
 med_imp_str2 <- foreach(i = 1:length(var_imp_str_sel), .combine = "rbind") %do%
   {
@@ -153,15 +120,19 @@ med_imp_str2 <- foreach(i = 1:length(var_imp_str_sel), .combine = "rbind") %do%
     #"lat", "lon", "party_hours"))
   }
 
-ggplot() +
-  geom_boxplot(data = med_imp_str1, aes(x = type, y = best_imp))
-
-g_imp2 <- ggplot() +
-  geom_jitter(
-    data = med_imp_str2,
-    aes(x = type, y = best_imp),
-    color = "#333D79FF",
-    alpha = 0.5
+g_imp2 <- ggplot(med_imp_str2) +
+  geom_violin(aes(x = type, y = best_imp), linewidth = 1.5, scale = "width") +
+  geom_quasirandom(
+    aes(x = type, y = best_imp + rnorm(length(best_imp), 0, 0.5), color = type),
+    alpha = 0.5,
+    size = 2
+  ) +
+  scale_color_manual(
+    values = c(
+      "Residual" = "#2A3132",
+      "Spatial" = "#763626",
+      "Temporal" = "#90AFC5"
+    )
   ) +
   labs(y = "Rank of Top Variable", x = "Variable Composition Type") +
   theme(
@@ -173,10 +144,8 @@ g_imp2 <- ggplot() +
     axis.title = element_text(size = 10)
   )
 
-g_imp1 + g_imp2 + plot_annotation(tag_levels = 'a')
-
-ggsave("fig2.pdf", width = 180, height = 150, units = "mm", dpi = 600)
-
+g_imp2
+#ggsave("fig_bbs1.pdf", width = 90, height = 90, units = "mm", dpi = 600)
 
 # Predict test set with space only models ---------------------------------
 
@@ -219,25 +188,6 @@ for (i in 1:length(data_rf_sp)) {
 }
 
 hist(R2_sp)
-
-# base model
-#pb <- txtProgressBar(max = length(data_rf_base), style = 3)
-#res_rf_base <- list()
-#R2_base <- c()
-
-#for (i in 1:length(data_rf_base)) {
-#res_rf_base[[i]] <- ranger(
-#log(abundance) ~ .,
-#data = data_rf_base[[i]],
-#num.trees = 500
-#)
-
-#R2_base[i] <- res_rf_base[[i]]$r.squared
-
-#setTxtProgressBar(pb, i)
-#}
-
-#hist(R2_base)
 
 # Predictions with SFTS
 species_sp <- species[idx_str]
@@ -289,194 +239,62 @@ data_pred_r <- foreach(i = 1:length(species_sp)) %do%
   }
 
 pred_r <- map_dbl(data_pred_r, function(x) cor(x$y_pred_sp, x$y))
-idx_pred <- which(pred_r > 0.5)
-data_pred_r <- data_pred_r[idx_pred]
-pred_r <- pred_r[idx_pred]
-species_sp_sel <- species_sp[idx_pred]
+#idx_pred <- which(pred_r < 0.5)
+
+#data_pred_r2 <- data_pred_r[idx_pred]
+#pred_r2 <- pred_r[idx_pred]
+#species_sp_sel <- species_sp[idx_pred]
 
 order(pred_r, decreasing = T)[1:10]
 
-g1 <- ggplot() +
+g1 <- ggplot(data_pred_r[[195]]) +
   geom_point(
     aes(
-      x = data_pred_r[[32]]$y_pred_sp,
-      y = data_pred_r[[32]]$y,
-      group = data_pred_r[[32]]$strata
+      x = y_pred_sp,
+      y = y,
+      group = strata
     ),
-    color = "pink3",
+    color = "#763626",
     alpha = 0.5,
     size = 2
   ) +
   geom_line(
     aes(
-      x = data_pred_r[[32]]$y_pred_sp,
-      y = data_pred_r[[32]]$y,
-      group = data_pred_r[[32]]$strata
+      x = y_pred_sp,
+      y = y,
+      group = strata
     ),
     linewidth = 1.25,
-    color = "#333D79FF",
+    color = "#90AFC5",
     alpha = 0.6,
     se = F,
     method = "lm",
     stat = "smooth"
   ) +
-  scale_y_continuous(limits = c(0, 1)) +
-  scale_x_continuous(limits = c(0, 1)) +
+  #scale_y_continuous(limits = c(0, 1)) +
+  #scale_x_continuous(limits = c(0, 1)) +
   labs(
-    title = "American Robin",
-    y = "Observed Abudance (log)",
-    x = "Predicted Abundance (log)"
+    title = "American Robin (Turdus migratorius)",
+    y = "Observed Abudance",
+    x = "Predicted Abundance"
   ) +
   theme(
     legend.position = "none",
     panel.grid.minor = element_blank(),
     panel.border = element_blank(),
-    axis.title.x = element_text(margin = margin(t = 10)),
-    axis.title.y = element_text(margin = margin(r = 10)),
+    #axis.title.x = element_text(margin = margin(t = 10)),
+    #axis.title.y = element_text(margin = margin(r = 10)),
     axis.title = element_text(size = 10),
     plot.title = element_text(hjust = 0.5)
   )
-
-g2 <- ggplot() +
-  geom_point(
-    aes(
-      x = data_pred_r[[52]]$y_pred_sp,
-      y = data_pred_r[[52]]$y,
-      group = data_pred_r[[52]]$strata
-    ),
-    color = "pink3",
-    alpha = 0.5,
-    size = 2
-  ) +
-  geom_line(
-    aes(
-      x = data_pred_r[[52]]$y_pred_sp,
-      y = data_pred_r[[52]]$y,
-      group = data_pred_r[[52]]$strata
-    ),
-    linewidth = 1.25,
-    color = "#333D79FF",
-    alpha = 0.6,
-    se = F,
-    method = "lm",
-    stat = "smooth"
-  ) +
-  scale_y_continuous(limits = c(0, 1)) +
-  scale_x_continuous(limits = c(0, 1)) +
-  labs(
-    title = "Western Meadowlark",
-    y = "Observed Abudance (log)",
-    x = "Predicted Abundance (log)"
-  ) +
-  theme(
-    legend.position = "none",
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
-    axis.title.x = element_text(margin = margin(t = 10)),
-    axis.title.y = element_text(margin = margin(r = 10)),
-    axis.title = element_text(size = 10),
-    plot.title = element_text(hjust = 0.5)
-  )
-
-g3 <- ggplot() +
-  geom_point(
-    aes(
-      x = data_pred_r[[26]]$y_pred_sp,
-      y = data_pred_r[[26]]$y,
-      group = data_pred_r[[26]]$strata
-    ),
-    color = "pink3",
-    alpha = 0.5,
-    size = 2
-  ) +
-  geom_line(
-    aes(
-      x = data_pred_r[[26]]$y_pred_sp,
-      y = data_pred_r[[26]]$y,
-      group = data_pred_r[[26]]$strata
-    ),
-    linewidth = 1.25,
-    color = "#333D79FF",
-    alpha = 0.6,
-    se = F,
-    method = "lm",
-    stat = "smooth"
-  ) +
-  scale_y_continuous(limits = c(0, 1)) +
-  scale_x_continuous(limits = c(0, 1)) +
-  labs(
-    title = "Northern Mockingbird",
-    y = "Observed Abudance (log)",
-    x = "Predicted Abundance (log)"
-  ) +
-  theme(
-    legend.position = "none",
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
-    axis.title.x = element_text(margin = margin(t = 10)),
-    axis.title.y = element_text(margin = margin(r = 10)),
-    axis.title = element_text(size = 10),
-    plot.title = element_text(hjust = 0.5)
-  )
-
-g4 <- ggplot() +
-  geom_point(
-    aes(
-      x = data_pred_r[[17]]$y_pred_sp,
-      y = data_pred_r[[17]]$y,
-      group = data_pred_r[[17]]$strata
-    ),
-    color = "pink3",
-    alpha = 0.5,
-    size = 2
-  ) +
-  geom_line(
-    aes(
-      x = data_pred_r[[17]]$y_pred_sp,
-      y = data_pred_r[[17]]$y,
-      group = data_pred_r[[17]]$strata
-    ),
-    linewidth = 1.25,
-    color = "#333D79FF",
-    alpha = 0.6,
-    se = F,
-    method = "lm",
-    stat = "smooth"
-  ) +
-  scale_y_continuous(limits = c(0, 1)) +
-  scale_x_continuous(limits = c(0, 1)) +
-  labs(
-    title = "Northern Cardinal",
-    y = "Observed Abudance (log)",
-    x = "Predicted Abundance (log)"
-  ) +
-  theme(
-    legend.position = "none",
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
-    axis.title.x = element_text(margin = margin(t = 10)),
-    axis.title.y = element_text(margin = margin(r = 10)),
-    axis.title = element_text(size = 10),
-    plot.title = element_text(hjust = 0.5)
-  )
-
-g1 +
-  g2 +
-  g3 +
-  g4 +
-  plot_layout(axes = "collect") +
-  plot_annotation(tag_levels = "a") &
-  theme(plot.tag.position = c(0.07, 1))
-
-ggsave("fig3.pdf", width = 180, height = 140, units = "mm", dpi = 600)
 
 # Correlation comparison
 data_pred_r2 <- do.call(rbind, data_pred_r)
-data_pred_r2$gr <- paste(
-  data_pred_r2$species_id,
-  data_pred_r2$strata,
-  sep = "-"
-)
+#data_pred_r3$gr <- paste(
+#data_pred_r3$species_id,
+#data_pred_r3$strata,
+#sep = "-"
+#)
 
 cor_temp <- data_pred_r2 %>%
   group_by(species_id, strata) %>%
@@ -485,27 +303,46 @@ cor_temp <- data_pred_r2 %>%
   group_by(species_id) %>%
   summarise(r = median(r[!is.na(r)]))
 
-cor_all <- data_pred_r2 %>%
+cor_sptemp <- data_pred_r2 %>%
   group_by(species_id) %>%
   summarise(r = cor(y, y_pred_sp))
 
-ggplot() +
-  geom_point(
-    aes(x = cor_all$r, y = cor_temp$r),
-    color = "#333D79FF",
-    alpha = 0.75,
-    size = 2
+dat_cor <- data.frame(
+  r = c(cor_all$r, cor_temp$r),
+  type = rep(
+    c("Spatio-temporal", "Temporal"),
+    each = length(cor_all$r)
+  )
+)
+
+g_pred <- ggplot(dat_cor) +
+  geom_violin(aes(x = type, y = r), linewidth = 1.5) +
+  geom_quasirandom(aes(x = type, y = r, color = type), alpha = 0.5, size = 2) +
+  scale_color_manual(
+    values = c(
+      "Spatio-temporal" = "#763626",
+      "Temporal" = "#90AFC5"
+    )
   ) +
-  labs(y = "Median Temporal Correlation", x = "Spatiotemporal Correlation") +
+  labs(y = "Prediction Correlation", x = "Prediction Type") +
   theme(
     panel.grid.minor = element_blank(),
     panel.border = element_blank(),
     #axis.title.x = element_text(margin = margin(t = 10)),
     #axis.title.y = element_text(margin = margin(r = 10)),
     axis.title = element_text(size = 10)
-  )
+  ) +
+  scale_y_continuous(limits = c(-0.5, 0.9), breaks = c(-0.4, 0, 0.4, 0.8))
 
-ggsave("fig4.pdf", width = 140, height = 100, units = "mm", dpi = 600)
+#ggsave("fig_bbs2.pdf", width = 90, height = 90, units = "mm", dpi = 600)
+
+plots_bbs <- list(
+  g1 = g1,
+  g_imp = g_imp2,
+  g_pred = g_pred
+)
+
+saveRDS(plots_bbs, "plots_bbs.rds")
 
 # Poster plots
 ggplot() +
@@ -538,8 +375,8 @@ ggplot() +
     axis.text = element_text(size = 16)
   )
 
-ggsave("poster_fig1.jpeg", width = 180, height = 140, units = "mm", dpi = 600)
-ggsave("poster_fig1.svg", width = 180, height = 140, units = "mm", dpi = 600)
+#ggsave("poster_fig1.jpeg", width = 180, height = 140, units = "mm", dpi = 600)
+#ggsave("poster_fig1.svg", width = 180, height = 140, units = "mm", dpi = 600)
 
 gp1 <- ggplot() +
   geom_point(
