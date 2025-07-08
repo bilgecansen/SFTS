@@ -346,10 +346,47 @@ g3 <- ggplot(data = d) +
   ) +
   labs(y = "Frequency", x = "Proportion of sites with r > 0.5")
 
+# Component variability plot
+v <- distinct(
+  bbs_train3,
+  strata,
+  year,
+  bio1_spatial,
+  bio1_temporal,
+  bio1_residual
+) %>%
+  group_by(strata, year) %>%
+  summarize(across(everything(), mean)) %>%
+  pivot_longer(cols = c(bio1_spatial, bio1_temporal, bio1_residual))
+
+g4 <- ggplot(data = v) +
+  geom_violin(
+    aes(x = name, y = value),
+    fill = "#485B7C",
+    color = "#792C1F",
+    alpha = 0.5,
+    linewidth = 1.05
+  ) +
+  labs(x = "Variable Components", y = "Standardized Temperature") +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.title = element_text(size = 10)
+  ) +
+  scale_x_discrete(
+    labels = c(
+      "bio1_temporal" = "Temporal",
+      "bio1_spatial" = "Spatial",
+      "bio1_residual" = "Residual"
+    )
+  )
+
+
 plots_bbs <- list(
   g1 = g1,
   g2 = g2,
   g3 = g3,
+  g4 = g4,
   g_imp = g_imp,
   g_pred = g_pred
 )

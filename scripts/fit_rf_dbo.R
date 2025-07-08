@@ -481,11 +481,45 @@ g4 <- ggplot(data = d) +
   ) +
   labs(y = "Frequency", x = "Proportion of sites with r > 0.5")
 
+# Component variability plot
+v <- distinct(
+  data_env_dec,
+  StationNme,
+  DataYear,
+  Temp_spatial,
+  Temp_temporal,
+  Temp_residual
+) %>%
+  pivot_longer(cols = c(Temp_spatial, Temp_temporal, Temp_residual))
+
+g5 <- ggplot(data = v) +
+  geom_violin(
+    aes(x = name, y = value),
+    fill = "#485B7C",
+    color = "#792C1F",
+    alpha = 0.5,
+    linewidth = 1.05
+  ) +
+  labs(x = "Variable Components", y = "Standardized Temperature") +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.title = element_text(size = 10)
+  ) +
+  scale_x_discrete(
+    labels = c(
+      "Temp_temporal" = "Temporal",
+      "Temp_spatial" = "Spatial",
+      "Temp_residual" = "Residual"
+    )
+  )
+
 plots_dbo <- list(
   g1 = g1,
   g2 = g2,
   g3 = g3,
   g4 = g4,
+  g5 = g5,
   g_imp = g_imp,
   g_pred = g_pred
 )
