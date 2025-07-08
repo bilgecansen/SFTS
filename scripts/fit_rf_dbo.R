@@ -238,7 +238,7 @@ for (i in 1:length(data_rf)) {
 hist(R2_fam)
 var_imp_fam_sel <- var_imp_fam[which(R2_fam >= 0.25)]
 
-med_imp_fam1 <- foreach(i = 1:length(var_imp_fam_sel), .combine = "rbind") %do%
+med_imp_fam <- foreach(i = 1:length(var_imp_fam_sel), .combine = "rbind") %do%
   {
     z <- var_imp_fam_sel[[i]][order(var_imp_fam_sel[[i]], decreasing = T)]
 
@@ -252,7 +252,7 @@ med_imp_fam1 <- foreach(i = 1:length(var_imp_fam_sel), .combine = "rbind") %do%
     )
   }
 
-g1 <- ggplot(med_imp_fam1) +
+g_imp <- ggplot(med_imp_fam) +
   geom_violin(aes(x = type, y = best_imp), linewidth = 1.5, scale = "width") +
   geom_quasirandom(
     aes(x = type, y = best_imp + rnorm(length(best_imp), 0, 0.5), color = type),
@@ -276,11 +276,8 @@ g1 <- ggplot(med_imp_fam1) +
     axis.title = element_text(size = 10)
   )
 
-#ggsave("fig_dbo2.pdf", width = 90, height = 90, units = "mm", dpi = 600)
 
 # Cross-validation with space only models ---------------------------------
-
-#families_sp <- families[which(R2_fam >= 0.25)]
 
 data_rf_sp <- map(
   data_rf,
@@ -290,15 +287,14 @@ data_rf_sp <- map(
       DataYear,
       StationNme,
       biomass,
-      #DBOreg,
-      #Latitude,
-      #Longitude,
+      DBOreg,
+      Latitude,
+      Longitude,
       Depth,
       contains("spatial")
     )
 )
 
-#data_rf_sp <- data_rf_sp[which(R2_fam >= 0.25)]
 data_rf_test <- data_rf
 
 # Predictions with SFTS
@@ -334,15 +330,15 @@ data_pred_r <- foreach(i = 1:length(families)) %do%
           data = select(dat_test, -StationNme, -DataYear)
         )
 
-        y_pred <- ((y_pred$predictions) -
-          min(log(dat_train$biomass))) /
-          (max(log(dat_train$biomass)) -
-            min(log(dat_train$biomass)))
+        y_pred <- (y_pred$predictions) #-
+        #min(log(dat_train$biomass))) /
+        #(max(log(dat_train$biomass)) -
+        #min(log(dat_train$biomass)))
 
-        y <- ((log(dat_test$biomass)) -
-          min(log(dat_train$biomass))) /
-          (max(log(dat_train$biomass)) -
-            min(log(dat_train$biomass)))
+        y <- (log(dat_test$biomass)) #-
+        #min(log(dat_train$biomass))) /
+        #(max(log(dat_train$biomass)) -
+        #min(log(dat_train$biomass)))
 
         data.frame(
           y_pred = y_pred,
@@ -355,10 +351,6 @@ data_pred_r <- foreach(i = 1:length(families)) %do%
   }
 
 pred_r <- map_dbl(data_pred_r, function(x) cor(x$y_pred, x$y))
-#idx_pred <- which(pred_r > 0.5)
-#data_pred_r <- data_pred_r[idx_pred]
-#pred_r <- pred_r[idx_pred]
-#families_sp_sel <- families[idx_pred]
 
 plot_pred <- function(i) {
   ggplot(data_pred_r[[i]]) +
@@ -408,10 +400,8 @@ order(pred_r, decreasing = T)
 
 for (i in 1:length(pred_r)) print(plot_pred(i))
 
-#plot_pred(11)
-g2 <- plot_pred(61)
-g3 <- plot_pred(10)
-g4 <- plot_pred(14)
+g1 <- plot_pred(56)
+g2 <- plot_pred(14)
 
 # Correlation comparison
 data_pred_r2 <- do.call(rbind, data_pred_r)
@@ -421,21 +411,25 @@ cor_temp <- data_pred_r2 %>%
   summarise(r = cor(y, y_pred)) %>%
   ungroup() %>%
   group_by(species_id) %>%
-  summarise(r = median(r[!is.na(r)]))
+  summarise(
+    r_med = median(r[!is.na(r)]),
+    r_min = quantile(r[!is.na(r)], 0.05),
+    r_max = quantile(r[!is.na(r)], 0.95)
+  )
 
-cor_all <- data_pred_r2 %>%
+cor_sptemp <- data_pred_r2 %>%
   group_by(species_id) %>%
   summarise(r = cor(y, y_pred))
 
 dat_cor <- data.frame(
-  r = c(cor_all$r, cor_temp$r),
+  r = c(cor_sptemp$r, cor_temp$r_med),
   type = rep(
     c("Spatio-temporal", "Temporal"),
     each = length(cor_all$r)
   )
 )
 
-g5 <- ggplot(dat_cor) +
+g_pred <- ggplot(dat_cor) +
   geom_violin(aes(x = type, y = r), linewidth = 1.5) +
   geom_quasirandom(aes(x = type, y = r, color = type), alpha = 0.5, size = 2) +
   scale_color_manual(
@@ -453,7 +447,46 @@ g5 <- ggplot(dat_cor) +
     axis.title = element_text(size = 10)
   )
 
-#ggsave("fig_dbo1.pdf", width = 90, height = 90, units = "mm", dpi = 600)
+## Sptemp vs temp across sites
+z <- left_join(cor_sptemp, cor_temp, by = "species_id")
 
-plots_dbo <- list(g1 = g1, g2 = g2, g3 = g3, g4 = g4, g5 = g5)
+g3 <- ggplot(data = z) +
+  geom_errorbar(
+    aes(x = r, ymin = r_min, ymax = r_max),
+    color = "#763626",
+    alpha = 0.5
+  ) +
+  geom_point(aes(y = r_med, x = r), color = "#763626", alpha = 0.9, size = 2) +
+  labs(x = "Spatio-temporal correlation", y = "Temporal correlation") +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.title = element_text(size = 10)
+  )
+
+# Proportion of sites with temporal cor > 0.5
+d <- data_pred_r2 %>%
+  group_by(species_id, site) %>%
+  summarise(r = cor(y, y_pred)) %>%
+  ungroup() %>%
+  group_by(species_id) %>%
+  summarise(n = length(which(r >= 0.5)) / length(r))
+
+g4 <- ggplot(data = d) +
+  geom_histogram(aes(n), color = "#90AFC5", fill = "#763626", alpha = 0.8) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.title = element_text(size = 10)
+  ) +
+  labs(y = "Frequency", x = "Proportion of sites with r > 0.5")
+
+plots_dbo <- list(
+  g1 = g1,
+  g2 = g2,
+  g3 = g3,
+  g4 = g4,
+  g_imp = g_imp,
+  g_pred = g_pred
+)
 saveRDS(plots_dbo, "plots_dbo.rds")
