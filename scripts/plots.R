@@ -8,12 +8,71 @@ plots_dbo <- readRDS("plots_dbo.rds")
 theme_set(theme_bw())
 
 # Figure 1
-g0 <- plots_sim$gm_uneven$spatial
-g0$layers[[1]]$aes_params$colour <- "#792C1F"
-g0$layers[[2]]$aes_params$colour <- "#485B7C"
+g0a <- plots_sim$gm_uneven$spatial #+
+#labs(title = "Simulation: Spatial (+), Temporal(0)")
 
-g0
-ggsave("figures/fig1.pdf", width = 120, height = 90, units = "mm", dpi = 600)
+k <- g0a$layers[[1]]
+g0a$layers[[1]] <- g0a$layers[[2]]
+g0a$layers[[2]] <- k
+
+g0a$layers[[1]]$aes_params$colour <- "#792C1F"
+g0a$layers[[1]]$aes_params$alpha <- 0.8
+
+g0a$layers[[2]]$aes_params$colour <- "#485B7C"
+g0a$layers[[2]]$aes_params$alpha <- 0.9
+g0a$layers[[2]]$aes_params$linewidth <- 1.5
+
+g0b <- plots_sim$g_pred_uneven$spatial +
+  theme(
+    plot.title = element_blank(),
+    axis.title = element_text(size = 9),
+    axis.text = element_text(size = 8),
+    #axis.title.x = element_blank(),
+    legend.position = "none"
+  )
+g0b$layers[[2]]$aes_params$colour <- "#792C1F"
+g0b$layers[[2]]$aes_params$alpha <- 1
+g0b$layers[[2]]$aes_params$size <- 3
+g0b$layers[[1]]$aes_params$colour <- "#485B7C"
+g0b$layers[[1]]$aes_params$alpha <- 0.8
+
+g0c <- plots_sim$g_pred_uneven_multi$spatial +
+  theme(
+    plot.title = element_blank(),
+    axis.title.y = element_text(size = 9),
+    axis.text.x = element_text(size = 8),
+    #axis.title.x = element_blank(),
+    legend.position = "none"
+  ) +
+  scale_y_continuous(
+    limits = c(-0.3, 1),
+    breaks = c(-0.6, -0.3, 0, 0.3, 0.6, 0.9)
+  ) +
+  scale_color_manual(
+    values = c(
+      "Species-wide" = "#792C1F",
+      "Population-level" = "#485B7C"
+    )
+  )
+g0c$layers[[2]]$aes_params$size <- 2
+g0c$layers[[2]]$aes_params$alpha <- 0.5
+
+layout <- "
+#AA#
+BBCC
+"
+
+g0a +
+  g0b +
+  g0c +
+  plot_annotation(
+    tag_levels = "a",
+    title = "Simulation: Spatial (+), Temporal (0)"
+  ) +
+  plot_layout(design = layout)
+
+ggsave("figures/fig1.pdf", width = 220, height = 180, units = "mm", dpi = 600)
+ggsave("figures/fig1.jpeg", width = 220, height = 180, units = "mm", dpi = 600)
 
 # Figure 2
 g1 <- plots_sim$g_imp_uneven$`spatio-temporal` +
@@ -29,27 +88,30 @@ g2 <- plots_sim$g_imp_uneven_multi$`spatio-temporal` +
       "Temporal" = "#485B7C"
     )
   )
+g2$layers[[2]]$aes_params$alpha <- 0.8
 
 g3 <- plots_sim$g_pred_uneven$`spatio-temporal` +
   theme(plot.title = element_text(size = 10))
-g3$layers[[1]]$aes_params$colour <- "#792C1F"
-g3$layers[[1]]$aes_params$alpha <- 0.4
-g3$layers[[2]]$aes_params$colour <- "#485B7C"
-g3$layers[[2]]$aes_params$alpha <- 0.6
+g3$layers[[2]]$aes_params$colour <- "#792C1F"
+g3$layers[[2]]$aes_params$alpha <- 1
+g3$layers[[2]]$aes_params$size <- 2
+g3$layers[[1]]$aes_params$colour <- "#485B7C"
+g3$layers[[1]]$aes_params$alpha <- 0.8
 
 g4 <- plots_sim$g_pred_uneven_multi$`spatio-temporal` +
   theme(plot.title = element_text(size = 10), legend.position = "none") +
   scale_color_manual(
     values = c(
-      "Spatio-temporal" = "#792C1F",
-      "Temporal" = "#485B7C"
+      "Species-wide" = "#792C1F",
+      "Population-level" = "#485B7C"
     )
   )
+g4$layers[[2]]$aes_params$alpha <- 0.8
 
 (g1 + g2) / free(g3 + g4) + plot_annotation(tag_levels = "a")
 
-ggsave("figures/fig2.pdf", width = 180, height = 180, units = "mm", dpi = 600)
-ggsave("figures/fig2.jpeg", width = 180, height = 180, units = "mm", dpi = 600)
+ggsave("figures/fig2.pdf", width = 220, height = 180, units = "mm", dpi = 600)
+ggsave("figures/fig2.jpeg", width = 220, height = 180, units = "mm", dpi = 600)
 
 # Figure 3
 h1 <- plots_sim$g_imp_uneven_multi$spatial +
@@ -67,8 +129,8 @@ h1 <- plots_sim$g_imp_uneven_multi$spatial +
       "Temporal" = "#485B7C"
     )
   )
+h1$layers[[2]]$aes_params$alpha <- 0.7
 
-plots_bbs$g_imp$layers[[2]]$aes_params$alpha <- 0.3
 h2 <- plots_bbs$g_imp +
   theme(
     plot.title = element_text(size = 10),
@@ -86,6 +148,7 @@ h2 <- plots_bbs$g_imp +
       "Temporal" = "#485B7C"
     )
   )
+h2$layers[[2]]$aes_params$alpha <- 0.7
 
 h3 <- plots_dbo$g_imp +
   theme(
@@ -105,11 +168,7 @@ h3 <- plots_dbo$g_imp +
       "Temporal" = "#485B7C"
     )
   )
-
-layout <- "
-#AA#
-BBCC
-"
+h3$layers[[2]]$aes_params$alpha <- 0.8
 
 h1 +
   h2 +
@@ -121,20 +180,7 @@ ggsave("figures/fig3.pdf", width = 220, height = 180, units = "mm", dpi = 600)
 ggsave("figures/fig3.jpeg", width = 220, height = 180, units = "mm", dpi = 600)
 
 # Figure 4
-j1 <- plots_sim$g_pred_uneven$spatial +
-  theme(
-    plot.title = element_text(size = 10),
-    axis.title = element_text(size = 9),
-    axis.text = element_text(size = 8),
-    #axis.title.x = element_blank(),
-    legend.position = "none"
-  )
-j1$layers[[1]]$aes_params$colour <- "#792C1F"
-j1$layers[[1]]$aes_params$alpha <- 0.4
-j1$layers[[2]]$aes_params$colour <- "#485B7C"
-j1$layers[[2]]$aes_params$alpha <- 0.6
-
-j2 <- plots_bbs$g1 +
+j1 <- plots_bbs$g1 +
   theme(
     plot.title = element_text(size = 10, hjust = 0),
     axis.text = element_text(size = 8),
@@ -143,40 +189,18 @@ j2 <- plots_bbs$g1 +
     #axis.title.y = element_blank(),
     legend.position = "none"
   )
-j2$layers[[1]]$aes_params$colour <- "#792C1F"
-j2$layers[[1]]$aes_params$alpha <- 0.4
-j2$layers[[2]]$aes_params$colour <- "#485B7C"
-j2$layers[[2]]$aes_params$alpha <- 0.4
-
-plots_sim$g_pred_uneven_multi$spatial$layers[[1]]$aes_params$size <- 2
-plots_sim$g_pred_uneven_multi$spatial$layers[[1]]$aes_params$alpha <- 0.2
-d1 <- plots_sim$g_pred_uneven_multi$spatial +
-  theme(
-    plot.title = element_text(size = 10),
-    axis.title.y = element_text(size = 9),
-    axis.text.x = element_text(size = 8),
-    #axis.title.x = element_blank(),
-    legend.position = "none"
-  ) +
-  scale_y_continuous(
-    limits = c(-0.3, 0.9),
-    breaks = c(-0.6, -0.3, 0, 0.3, 0.6, 0.9)
-  ) +
-  scale_color_manual(
-    values = c(
-      "Spatio-temporal" = "#792C1F",
-      "Temporal" = "#485B7C"
-    )
-  )
+j1$layers[[2]]$aes_params$colour <- "#792C1F"
+j1$layers[[2]]$aes_params$alpha <- 1
+j1$layers[[1]]$aes_params$colour <- "#485B7C"
+j1$layers[[1]]$aes_params$alpha <- 0.8
 
 # Include only sptemp r > 0.5
-z <- filter(plots_bbs$g_pred$data, type == "Spatio-temporal")
+z <- filter(plots_bbs$g_pred$data, type == "Species-wide")
 idx_bbs <- which(z$r >= 0.5)
 idx_bbs <- c(idx_bbs, idx_bbs + 293)
 plots_bbs$g_pred$data <- plots_bbs$g_pred$data[idx_bbs, ]
 
-plots_bbs$g_pred$layers[[1]]$aes_params$alpha <- 0.4
-d2 <- plots_bbs$g_pred +
+d1 <- plots_bbs$g_pred +
   theme(
     plot.title = element_text(size = 10),
     axis.text.x = element_text(size = 8),
@@ -186,16 +210,25 @@ d2 <- plots_bbs$g_pred +
   ) +
   labs(title = "Breeding Bird Survey") +
   scale_y_continuous(
-    limits = c(-0.65, 0.9),
+    limits = c(-0.65, 1),
     breaks = c(-0.6, -0.3, 0, 0.3, 0.6, 0.9)
   ) +
   scale_color_manual(
     values = c(
-      "Spatio-temporal" = "#792C1F",
-      "Temporal" = "#485B7C"
+      "Species-wide" = "#792C1F",
+      "Population-level" = "#485B7C"
     )
   )
+d1$layers[[2]]$aes_params$alpha <- 0.5
 
+j1 +
+  d1 +
+  plot_annotation(tag_levels = "a")
+
+ggsave("figures/fig4.pdf", width = 220, height = 100, units = "mm", dpi = 600)
+ggsave("figures/fig4.jpeg", width = 220, height = 100, units = "mm", dpi = 600)
+
+# Figure 5
 j3 <- plots_dbo$g2 +
   labs(title = "Tellinidae") +
   theme(
@@ -205,17 +238,34 @@ j3 <- plots_dbo$g2 +
     #axis.title.y = element_blank(),
     legend.position = "none"
   )
-j3$layers[[1]]$aes_params$colour <- "#792C1F"
-j3$layers[[2]]$aes_params$colour <- "#485B7C"
+j3$layers[[2]]$aes_params$colour <- "#792C1F"
+j3$layers[[2]]$aes_params$alpha <- 1
+j3$layers[[2]]$aes_params$size <- 3
+j3$layers[[1]]$aes_params$colour <- "#485B7C"
+j3$layers[[1]]$aes_params$alpha <- 0.8
+
+j4 <- plots_dbo$g1 +
+  labs(title = "Pseudocumatidae") +
+  theme(
+    plot.title = element_text(size = 10, hjust = 0),
+    axis.title = element_text(size = 9),
+    axis.text = element_text(size = 8),
+    #axis.title.y = element_blank(),
+    legend.position = "none"
+  )
+j4$layers[[2]]$aes_params$colour <- "#792C1F"
+j4$layers[[2]]$aes_params$alpha <- 1
+j4$layers[[2]]$aes_params$size <- 3
+j4$layers[[1]]$aes_params$colour <- "#485B7C"
+j4$layers[[1]]$aes_params$alpha <- 0.8
 
 # Include only sptemp r > 0.5
-m <- filter(plots_dbo$g_pred$data, type == "Spatio-temporal")
+m <- filter(plots_dbo$g_pred$data, type == "Species-wide")
 idx_dbo <- which(m$r >= 0.5)
 idx_dbo <- c(idx_dbo, idx_dbo + 61)
 plots_dbo$g_pred$data <- plots_dbo$g_pred$data[idx_dbo, ]
 
-plots_dbo$g_pred$layers[[1]]$aes_params$alpha <- 0.5
-d3 <- plots_dbo$g_pred +
+d2 <- plots_dbo$g_pred +
   theme(
     plot.title = element_text(size = 10),
     axis.title.x = element_text(size = 9),
@@ -230,50 +280,107 @@ d3 <- plots_dbo$g_pred +
   ) +
   scale_color_manual(
     values = c(
-      "Spatio-temporal" = "#792C1F",
-      "Temporal" = "#485B7C"
+      "Species-wide" = "#792C1F",
+      "Population-level" = "#485B7C"
     )
   )
+d2$layers[[2]]$aes_params$alpha <- 0.8
 
-j1 +
-  d1 +
-  j2 +
-  d2 +
+d2 +
   j3 +
-  d3 +
+  j4 +
   plot_annotation(tag_levels = "a") +
-  plot_layout(nrow = 3, ncol = 2)
+  plot_layout(design = layout)
 
-ggsave("figures/fig4.pdf", width = 220, height = 270, units = "mm", dpi = 600)
+ggsave("figures/fig5.pdf", width = 220, height = 180, units = "mm", dpi = 600)
+ggsave("figures/fig5.jpeg", width = 220, height = 180, units = "mm", dpi = 600)
 
 # Supplemental figures
-s1 <- plots_bbs$g2
-s1$layers[[1]]$aes_params$colour <- "#792C1F"
-s1$layers[[2]]$aes_params$colour <- "#792C1F"
 
-s2 <- plots_bbs$g3
-s2$layers[[1]]$aes_params$colour <- "#485B7C"
-s2$layers[[1]]$aes_params$fill <- "#792C1F"
-
-s3 <- plots_dbo$g3
-s3$layers[[1]]$aes_params$colour <- "#792C1F"
-s3$layers[[2]]$aes_params$colour <- "#792C1F"
-
-s4 <- plots_dbo$g4
-s4$layers[[1]]$aes_params$colour <- "#485B7C"
-s4$layers[[1]]$aes_params$fill <- "#792C1F"
+# Fig S1
+s1 <- plots_bbs$g3 +
+  labs(title = "Breeding Bird Survey")
+s2 <- plots_dbo$g4 +
+  labs(title = "Disributed Biological Observatory")
 
 s1 +
   s2 +
-  s3 +
-  s4 +
-  plot_annotation(tag_levels = "a") +
-  plot_layout(nrow = 2, ncol = 2)
+  plot_annotation(tag_levels = "a")
 
 ggsave(
-  "figures/fig_supp2.pdf",
+  "figures/figS1.pdf",
   width = 220,
-  height = 180,
+  height = 100,
   units = "mm",
   dpi = 600
 )
+
+ggsave(
+  "figures/figS1.jpeg",
+  width = 220,
+  height = 100,
+  units = "mm",
+  dpi = 600
+)
+
+# Fig S2
+## Include only sptemp r > 0.5
+z <- filter(plots_bbs$g_pred2$data, type == "Species-wide")
+idx_bbs <- which(z$r >= 0.5)
+idx_bbs <- c(idx_bbs, idx_bbs + 293)
+plots_bbs$g_pred2$data <- plots_bbs$g_pred2$data[idx_bbs, ]
+
+d3 <- plots_bbs$g_pred2 +
+  theme(
+    plot.title = element_text(size = 10),
+    axis.text.x = element_text(size = 8),
+    #axis.title.x = element_blank(),
+    #axis.title.y = element_blank(),
+    legend.position = "none"
+  ) +
+  labs(title = "Breeding Bird Survey") +
+  scale_y_continuous(
+    limits = c(-0.65, 1),
+    breaks = c(-0.6, -0.3, 0, 0.3, 0.6, 0.9)
+  ) +
+  scale_color_manual(
+    values = c(
+      "Species-wide" = "#792C1F",
+      "Population-level" = "#485B7C"
+    )
+  )
+d3$layers[[2]]$aes_params$alpha <- 0.5
+
+## Include only sptemp r > 0.5
+m <- filter(plots_dbo$g_pred2$data, type == "Species-wide")
+idx_dbo <- which(m$r >= 0.5)
+idx_dbo <- c(idx_dbo, idx_dbo + 61)
+plots_dbo$g_pred2$data <- plots_dbo$g_pred2$data[idx_dbo, ]
+
+d4 <- plots_dbo$g_pred2 +
+  theme(
+    plot.title = element_text(size = 10),
+    axis.text.x = element_text(size = 8),
+    #axis.title.x = element_blank(),
+    #axis.title.y = element_blank(),
+    legend.position = "none"
+  ) +
+  labs(title = "Distributed Biological Observatory") +
+  scale_y_continuous(
+    limits = c(-0.9, 1),
+    breaks = c(-0.9, -0.6, -0.3, 0, 0.3, 0.6, 0.9)
+  ) +
+  scale_color_manual(
+    values = c(
+      "Species-wide" = "#792C1F",
+      "Population-level" = "#485B7C"
+    )
+  )
+d4$layers[[2]]$aes_params$alpha <- 0.5
+
+d3 +
+  d4 +
+  plot_annotation(tag_levels = "a")
+
+ggsave("figures/figS2.pdf", width = 220, height = 100, units = "mm", dpi = 600)
+ggsave("figures/figS2.jpeg", width = 220, height = 100, units = "mm", dpi = 600)
