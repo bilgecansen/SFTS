@@ -164,6 +164,21 @@ data_rf_sp <- map(
     )
 )
 
+data_rf_sptemp <- map(
+  data_rf_str,
+  function(x)
+    select(
+      x,
+      abundance,
+      elevs,
+      lat,
+      long,
+      strata,
+      party_hours,
+      contains(c("spatial", "temporal", "residual"))
+    )
+)
+
 # spatial model
 pb <- txtProgressBar(max = length(data_rf_sp), style = 3)
 res_rf_sp <- list()
@@ -173,7 +188,7 @@ for (i in 1:length(data_rf_sp)) {
   res_rf_sp[[i]] <- ranger(
     log(abundance) ~ .,
     data = data_rf_sp[[i]],
-    num.trees = 2000
+    num.trees = 500
   )
 
   R2_sp[i] <- res_rf_sp[[i]]$r.squared
@@ -183,10 +198,29 @@ for (i in 1:length(data_rf_sp)) {
 
 hist(R2_sp)
 
+# spatio-temporal model
+pb <- txtProgressBar(max = length(data_rf_sp), style = 3)
+res_rf_sptemp <- list()
+R2_sptemp <- c()
+
+for (i in 1:length(data_rf_sptemp)) {
+  res_rf_sptemp[[i]] <- ranger(
+    log(abundance) ~ .,
+    data = data_rf_sptemp[[i]],
+    num.trees = 2000
+  )
+
+  R2_sptemp[i] <- res_rf_sptemp[[i]]$r.squared
+
+  setTxtProgressBar(pb, i)
+}
+
+hist(R2_sp)
+
 # Predictions with SFTS
 species_sp <- species[idx_str]
 
-data_pred_r <- foreach(i = 1:length(species_sp)) %do%
+data_pred <- foreach(i = 1:length(species_sp)) %do%
   {
     dat <- filter(bbs_test, species_id == as.numeric(species_sp[i])) %>%
       dplyr::select(-site_id) %>%
@@ -198,28 +232,28 @@ data_pred_r <- foreach(i = 1:length(species_sp)) %do%
 
     dat_pred <- foreach(h = 1:length(sites), .combine = "rbind") %do%
       {
-        dat_site <- filter(dat, strata == sites[h]) %>%
+        dat_site_sp <- filter(dat, strata == sites[h]) %>%
           select(elevs, lat, long, strata, party_hours, contains("bio")) %>%
-          select(-contains("lag")) %>%
+          select(-contains(c("lag", "spatial", "temporal", "residual"))) %>%
           rename_with(~ paste(., "spatial", sep = "_"), contains("bio")) %>%
           as.data.frame()
 
-        if (nrow(dat_site) < 5) return(NA)
+        dat_site_sptemp <- filter(dat, strata == sites[h]) %>%
+          as.data.frame()
 
-        y_pred_sp <- predict(res_rf_sp[[i]], data = dat_site)
+        if (nrow(dat_site_sp) < 5) return(NA)
 
-        y_pred_sp <- y_pred_sp$predictions #-
-        #min(log(data_rf_sp[[i]]$abundance))) /
-        #(max(log(data_rf_sp[[i]]$abundance)) -
-        #min(log(data_rf_sp[[i]]$abundance)))
+        y_pred_sp <- predict(res_rf_sp[[i]], data = dat_site_sp)
+        y_pred_sp <- y_pred_sp$predictions
+
+        y_pred_sptemp <- predict(res_rf_sptemp[[i]], data = dat_site_sptemp)
+        y_pred_sptemp <- y_pred_sptemp$predictions
 
         y <- log(filter(dat, strata == sites[h])$abundance) #-
-        #min(log(data_rf_sp[[i]]$abundance))) /
-        #(max(log(data_rf_sp[[i]]$abundance)) -
-        #min(log(data_rf_sp[[i]]$abundance)))
 
         data.frame(
           y_pred_sp = y_pred_sp,
+          y_pred_sptemp = y_pred_sptemp,
           y = y,
           species_id = species_sp[i],
           strata = sites[h]
@@ -229,20 +263,12 @@ data_pred_r <- foreach(i = 1:length(species_sp)) %do%
     dat_pred[!is.na(dat_pred$y), ]
   }
 
-pred_r <- map_dbl(data_pred_r, function(x) cor(x$y_pred_sp, x$y))
+pred_r <- map_dbl(data_pred, function(x) cor(x$y_pred_sp, x$y))
 order(pred_r, decreasing = T)[1:10]
 
-g1 <- ggplot(data_pred_r[[47]]) +
-  geom_point(
-    aes(
-      x = y_pred_sp,
-      y = y,
-      group = strata
-    ),
-    color = "#763626",
-    alpha = 0.5,
-    size = 2
-  ) +
+z <- data_pred[[47]]
+
+g1 <- ggplot(z) +
   geom_line(
     aes(
       x = y_pred_sp,
@@ -251,7 +277,7 @@ g1 <- ggplot(data_pred_r[[47]]) +
     ),
     linewidth = 1.25,
     color = "#90AFC5",
-    alpha = 0.6,
+    alpha = 0.8,
     se = F,
     method = "lm",
     stat = "smooth"
@@ -261,6 +287,18 @@ g1 <- ggplot(data_pred_r[[47]]) +
     y = "Observed Abudance",
     x = "Predicted Abundance"
   ) +
+  geom_point(
+    data = group_by(z, strata) %>%
+      summarise(y_pred_sp = mean(y_pred_sp), y = mean(y)),
+    aes(
+      x = y_pred_sp,
+      y = y,
+      group = strata
+    ),
+    color = "#763626",
+    #alpha = 0.5,
+    size = 2
+  ) +
   theme(
     legend.position = "none",
     panel.grid.minor = element_blank(),
@@ -269,10 +307,10 @@ g1 <- ggplot(data_pred_r[[47]]) +
     plot.title = element_text(hjust = 0.5)
   )
 
-# Correlation comparison
-data_pred_r2 <- do.call(rbind, data_pred_r)
+# Correlation comparison for SFTS
+data_pred_sp <- do.call(rbind, data_pred)
 
-cor_temp <- data_pred_r2 %>%
+cor_temp <- data_pred_sp %>%
   group_by(species_id, strata) %>%
   summarise(r = cor(y, y_pred_sp)) %>%
   ungroup() %>%
@@ -283,15 +321,18 @@ cor_temp <- data_pred_r2 %>%
     r_max = quantile(r[!is.na(r)], 0.95)
   )
 
-cor_sptemp <- data_pred_r2 %>%
+cor_sp <- data_pred_sp %>%
+  group_by(species_id, strata) %>%
+  summarise(y = mean(y), y_pred_sp = mean(y_pred_sp)) %>%
+  ungroup() %>%
   group_by(species_id) %>%
   summarise(r = cor(y, y_pred_sp))
 
 dat_cor <- data.frame(
-  r = c(cor_sptemp$r, cor_temp$r_med),
+  r = c(cor_sp$r, cor_temp$r_med),
   type = rep(
-    c("Spatio-temporal", "Temporal"),
-    each = length(cor_sptemp$r)
+    c("Species-wide", "Population-level"),
+    each = length(cor_sp$r)
   )
 )
 
@@ -300,44 +341,73 @@ g_pred <- ggplot(dat_cor) +
   geom_quasirandom(aes(x = type, y = r, color = type), alpha = 0.5, size = 2) +
   scale_color_manual(
     values = c(
-      "Spatio-temporal" = "#763626",
-      "Temporal" = "#90AFC5"
+      "Species-wide" = "#763626",
+      "Population-level" = "#90AFC5"
     )
   ) +
   labs(y = "Prediction Correlation", x = "Prediction Type") +
   theme(
     panel.grid.minor = element_blank(),
     panel.border = element_blank(),
-    axis.title = element_text(size = 10)
+    axis.title = element_text(size = 10),
+    legend.position = "none"
   ) +
-  scale_y_continuous(limits = c(-0.55, 0.9), breaks = c(-0.4, 0, 0.4, 0.8))
+  scale_y_continuous(limits = c(-0.55, 1), breaks = c(-0.3, 0, 0.3, 0.6, 0.9))
 
-## Sptemp vs temp across sites
-z <- left_join(cor_sptemp, cor_temp, by = "species_id")
+# Correlation comparison for spatio-temporal models
+cor_temp_sptemp <- data_pred_sp %>%
+  group_by(species_id, strata) %>%
+  summarise(r = cor(y, y_pred_sptemp)) %>%
+  ungroup() %>%
+  group_by(species_id) %>%
+  summarise(
+    r_med = median(r[!is.na(r)]),
+    r_min = quantile(r[!is.na(r)], 0.05),
+    r_max = quantile(r[!is.na(r)], 0.95)
+  )
 
-g2 <- ggplot(data = z) +
-  geom_errorbar(
-    aes(x = r, ymin = r_min, ymax = r_max),
-    color = "#763626",
-    alpha = 0.5
+cor_sptemp <- data_pred_sp %>%
+  group_by(species_id, strata) %>%
+  summarise(y = mean(y), y_pred_sp = mean(y_pred_sptemp)) %>%
+  ungroup() %>%
+  group_by(species_id) %>%
+  summarise(r = cor(y, y_pred_sp))
+
+dat_cor_sptemp <- data.frame(
+  r = c(cor_sptemp$r, cor_temp_sptemp$r_med),
+  type = rep(
+    c("Species-wide", "Population-level"),
+    each = length(cor_sp$r)
+  )
+)
+
+g_pred2 <- ggplot(dat_cor_sptemp) +
+  geom_violin(aes(x = type, y = r), linewidth = 1.5) +
+  geom_quasirandom(aes(x = type, y = r, color = type), alpha = 0.5, size = 2) +
+  scale_color_manual(
+    values = c(
+      "Species-wide" = "#763626",
+      "Population-level" = "#90AFC5"
+    )
   ) +
-  geom_point(aes(y = r_med, x = r), color = "#763626", alpha = 0.9, size = 2) +
-  labs(x = "Spatio-temporal correlation", y = "Temporal correlation") +
+  labs(y = "Prediction Correlation", x = "Prediction Type") +
   theme(
     panel.grid.minor = element_blank(),
     panel.border = element_blank(),
-    axis.title = element_text(size = 10)
-  )
+    axis.title = element_text(size = 10),
+    legend.position = "none"
+  ) +
+  scale_y_continuous(limits = c(-0.55, 1), breaks = c(-0.3, 0, 0.3, 0.6, 0.9))
 
 # Proportion of sites with temporal cor > 0.5
-d <- data_pred_r2 %>%
+d <- data_pred_sp %>%
   group_by(species_id, strata) %>%
   summarise(r = cor(y, y_pred_sp)) %>%
   ungroup() %>%
   group_by(species_id) %>%
   summarise(n = length(which(r >= 0.5)) / length(r))
 
-g3 <- ggplot(data = d) +
+g2 <- ggplot(data = d) +
   geom_histogram(aes(n), color = "#90AFC5", fill = "#763626", alpha = 0.8) +
   theme(
     panel.grid.minor = element_blank(),
@@ -359,7 +429,7 @@ v <- distinct(
   summarize(across(everything(), mean)) %>%
   pivot_longer(cols = c(bio1_spatial, bio1_temporal, bio1_residual))
 
-g4 <- ggplot(data = v) +
+g3 <- ggplot(data = v) +
   geom_violin(
     aes(x = name, y = value),
     fill = "#485B7C",
@@ -386,9 +456,9 @@ plots_bbs <- list(
   g1 = g1,
   g2 = g2,
   g3 = g3,
-  g4 = g4,
   g_imp = g_imp,
-  g_pred = g_pred
+  g_pred = g_pred,
+  g_pred2 = g_pred2
 )
 
 saveRDS(plots_bbs, "plots_bbs.rds")
