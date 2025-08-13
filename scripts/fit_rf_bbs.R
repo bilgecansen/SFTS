@@ -62,15 +62,10 @@ data_rf_str <- foreach(i = 1:length(species)) %do%
           "bio16",
           "bio18"
         )),
-        -ends_with(c(
-          "bio2",
-          "bio3",
-          "bio5",
-          "bio8",
-          "bio9",
-          "bio15",
-          "bio16",
-          "bio18"
+        contains(c(
+          "spatial",
+          "temporal",
+          "residual"
         )),
         -contains("lag_spatial"),
         strata
@@ -164,7 +159,7 @@ data_rf_sp <- map(
     )
 )
 
-data_rf_sptemp <- map(
+data_rf_decomp <- map(
   data_rf_str,
   function(x)
     select(
@@ -179,6 +174,41 @@ data_rf_sptemp <- map(
     )
 )
 
+data_rf_sptemp <- foreach(i = 1:length(species)) %do%
+  {
+    filter(bbs_train3, species_id == species[i]) %>%
+      dplyr::select(-site_id, -species_site) %>%
+      group_by(species_id, strata, year) %>%
+      summarize(across(everything(), mean)) %>%
+      ungroup() %>%
+      select(
+        abundance,
+        elevs,
+        lat,
+        long,
+        party_hours,
+        contains(c(
+          "bio2",
+          "bio3",
+          "bio5",
+          "bio8",
+          "bio9",
+          "bio15",
+          "bio16",
+          "bio18"
+        )),
+        -contains(c(
+          "spatial",
+          "temporal",
+          "residual"
+        )),
+        strata
+      )
+  }
+names(data_rf_sptemp) <- species
+data_rf_sptemp <- data_rf_sptemp[idx_str]
+
+
 # spatial model
 pb <- txtProgressBar(max = length(data_rf_sp), style = 3)
 res_rf_sp <- list()
@@ -188,7 +218,7 @@ for (i in 1:length(data_rf_sp)) {
   res_rf_sp[[i]] <- ranger(
     log(abundance) ~ .,
     data = data_rf_sp[[i]],
-    num.trees = 500
+    num.trees = 2000
   )
 
   R2_sp[i] <- res_rf_sp[[i]]$r.squared
@@ -198,8 +228,28 @@ for (i in 1:length(data_rf_sp)) {
 
 hist(R2_sp)
 
+# decomposed model
+pb <- txtProgressBar(max = length(data_rf_decomp), style = 3)
+res_rf_decomp <- list()
+R2_decomp <- c()
+
+for (i in 1:length(data_rf_decomp)) {
+  res_rf_decomp[[i]] <- ranger(
+    log(abundance) ~ .,
+    data = data_rf_decomp[[i]],
+    num.trees = 2000
+  )
+
+  R2_decomp[i] <- res_rf_decomp[[i]]$r.squared
+
+  setTxtProgressBar(pb, i)
+}
+
+hist(R2_decomp)
+
+
 # spatio-temporal model
-pb <- txtProgressBar(max = length(data_rf_sp), style = 3)
+pb <- txtProgressBar(max = length(data_rf_sptemp), style = 3)
 res_rf_sptemp <- list()
 R2_sptemp <- c()
 
@@ -215,13 +265,31 @@ for (i in 1:length(data_rf_sptemp)) {
   setTxtProgressBar(pb, i)
 }
 
-hist(R2_sp)
+hist(R2_sptemp)
 
 # Predictions with SFTS
 species_sp <- species[idx_str]
 
 data_pred <- foreach(i = 1:length(species_sp)) %do%
   {
+    res_rf_sp <- ranger(
+      log(abundance) ~ .,
+      data = data_rf_sp[[i]],
+      num.trees = 2000
+    )
+
+    res_rf_decomp <- ranger(
+      log(abundance) ~ .,
+      data = data_rf_decomp[[i]],
+      num.trees = 2000
+    )
+
+    res_rf_sptemp <- ranger(
+      log(abundance) ~ .,
+      data = data_rf_sptemp[[i]],
+      num.trees = 2000
+    )
+
     dat <- filter(bbs_test, species_id == as.numeric(species_sp[i])) %>%
       dplyr::select(-site_id) %>%
       group_by(species_id, strata, year) %>%
@@ -243,16 +311,20 @@ data_pred <- foreach(i = 1:length(species_sp)) %do%
 
         if (nrow(dat_site_sp) < 5) return(NA)
 
-        y_pred_sp <- predict(res_rf_sp[[i]], data = dat_site_sp)
+        y_pred_sp <- predict(res_rf_sp, data = dat_site_sp)
         y_pred_sp <- y_pred_sp$predictions
 
-        y_pred_sptemp <- predict(res_rf_sptemp[[i]], data = dat_site_sptemp)
+        y_pred_decomp <- predict(res_rf_decomp, data = dat_site_sptemp)
+        y_pred_decomp <- y_pred_decomp$predictions
+
+        y_pred_sptemp <- predict(res_rf_sptemp, data = dat_site_sptemp)
         y_pred_sptemp <- y_pred_sptemp$predictions
 
-        y <- log(filter(dat, strata == sites[h])$abundance) #-
+        y <- log(filter(dat, strata == sites[h])$abundance)
 
         data.frame(
           y_pred_sp = y_pred_sp,
+          y_pred_decomp = y_pred_decomp,
           y_pred_sptemp = y_pred_sptemp,
           y = y,
           species_id = species_sp[i],
@@ -399,6 +471,51 @@ g_pred2 <- ggplot(dat_cor_sptemp) +
   ) +
   scale_y_continuous(limits = c(-0.55, 1), breaks = c(-0.3, 0, 0.3, 0.6, 0.9))
 
+# Correlation comparison for decomp models
+cor_temp_decomp <- data_pred_sp %>%
+  group_by(species_id, strata) %>%
+  summarise(r = cor(y, y_pred_decomp)) %>%
+  ungroup() %>%
+  group_by(species_id) %>%
+  summarise(
+    r_med = median(r[!is.na(r)]),
+    r_min = quantile(r[!is.na(r)], 0.05),
+    r_max = quantile(r[!is.na(r)], 0.95)
+  )
+
+cor_decomp <- data_pred_sp %>%
+  group_by(species_id, strata) %>%
+  summarise(y = mean(y), y_pred_sp = mean(y_pred_decomp)) %>%
+  ungroup() %>%
+  group_by(species_id) %>%
+  summarise(r = cor(y, y_pred_sp))
+
+dat_cor_decomp <- data.frame(
+  r = c(cor_decomp$r, cor_temp_decomp$r_med),
+  type = rep(
+    c("Species-wide", "Population-level"),
+    each = length(cor_sp$r)
+  )
+)
+
+g_pred3 <- ggplot(dat_cor_decomp) +
+  geom_violin(aes(x = type, y = r), linewidth = 1.5) +
+  geom_quasirandom(aes(x = type, y = r, color = type), alpha = 0.5, size = 2) +
+  scale_color_manual(
+    values = c(
+      "Species-wide" = "#763626",
+      "Population-level" = "#90AFC5"
+    )
+  ) +
+  labs(y = "Prediction Correlation", x = "Prediction Type") +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.title = element_text(size = 10),
+    legend.position = "none"
+  ) +
+  scale_y_continuous(limits = c(-0.55, 1), breaks = c(-0.3, 0, 0.3, 0.6, 0.9))
+
 # Proportion of sites with temporal cor > 0.5
 d <- data_pred_sp %>%
   group_by(species_id, strata) %>%
@@ -458,7 +575,8 @@ plots_bbs <- list(
   g3 = g3,
   g_imp = g_imp,
   g_pred = g_pred,
-  g_pred2 = g_pred2
+  g_pred2 = g_pred2,
+  g_pred3 = g_pred3
 )
 
 saveRDS(plots_bbs, "plots_bbs.rds")

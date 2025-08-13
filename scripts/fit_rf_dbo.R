@@ -295,7 +295,7 @@ data_rf_sp <- map(
     )
 )
 
-data_rf_sptemp <- map(
+data_rf_decomp <- map(
   data_rf,
   function(x)
     select(
@@ -308,6 +308,16 @@ data_rf_sptemp <- map(
       Longitude,
       Depth,
       contains(c("spatial", "temporal", "residual"))
+    )
+)
+
+data_rf_sptemp <- map(
+  data_rf,
+  function(x)
+    select(
+      x,
+      -contains(c("spatial", "temporal", "residual")),
+      -family
     )
 )
 
@@ -329,6 +339,12 @@ data_pred <- foreach(i = 1:length(families)) %do%
         ) %>%
           select(-StationNme, -DataYear)
 
+        dat_train_decomp <- filter(
+          data_rf_decomp[[i]],
+          DataYear != years[t]
+        ) %>%
+          select(-StationNme, -DataYear)
+
         dat_test_sp <- filter(data_rf_test[[i]], DataYear == years[t]) %>%
           select(
             -family,
@@ -342,20 +358,17 @@ data_pred <- foreach(i = 1:length(families)) %do%
         )
 
         dat_test_sptemp <- filter(data_rf_test[[i]], DataYear == years[t]) %>%
-          select(
-            DataYear,
-            StationNme,
-            biomass,
-            DBOreg,
-            Latitude,
-            Longitude,
-            Depth,
-            contains(c("spatial", "temporal", "residual")),
-          )
+          as.data.frame()
 
         res_rf_sp <- ranger(
           log(biomass) ~ .,
           data = dat_train_sp,
+          num.trees = 2000
+        )
+
+        res_rf_decomp <- ranger(
+          log(biomass) ~ .,
+          data = dat_train_decomp,
           num.trees = 2000
         )
 
@@ -370,6 +383,11 @@ data_pred <- foreach(i = 1:length(families)) %do%
           data = select(dat_test_sp, -StationNme, -DataYear)
         )
 
+        y_pred_decomp <- predict(
+          res_rf_decomp,
+          data = select(dat_test_sptemp, -StationNme, -DataYear)
+        )
+
         y_pred_sptemp <- predict(
           res_rf_sptemp,
           data = select(dat_test_sptemp, -StationNme, -DataYear)
@@ -377,11 +395,13 @@ data_pred <- foreach(i = 1:length(families)) %do%
 
         y_pred_sp <- (y_pred_sp$predictions)
         y_pred_sptemp <- (y_pred_sptemp$predictions)
+        y_pred_decomp <- (y_pred_decomp$predictions)
 
         y <- (log(dat_test_sp$biomass))
 
         data.frame(
           y_pred_sp = y_pred_sp,
+          y_pred_decomp = y_pred_decomp,
           y_pred_sptemp = y_pred_sptemp,
           y = y,
           species_id = families[i],
@@ -391,7 +411,7 @@ data_pred <- foreach(i = 1:length(families)) %do%
       }
   }
 
-pred_r <- map_dbl(data_pred_r, function(x) cor(x$y_pred_sp, x$y))
+pred_r <- map_dbl(data_pred, function(x) cor(x$y_pred_sp, x$y))
 
 plot_pred <- function(i) {
   z <- data_pred[[i]]
@@ -548,6 +568,54 @@ g_pred2 <- ggplot(dat_cor_sptemp) +
     breaks = c(-0.9, -0.6, -0.3, 0, 0.3, 0.6, 0.9)
   )
 
+# Correlation comparison for decomposed models
+cor_temp_decomp <- data_pred_sp %>%
+  group_by(species_id, site) %>%
+  summarise(r = cor(y, y_pred_decomp)) %>%
+  ungroup() %>%
+  group_by(species_id) %>%
+  summarise(
+    r_med = median(r[!is.na(r)]),
+    r_min = quantile(r[!is.na(r)], 0.05),
+    r_max = quantile(r[!is.na(r)], 0.95)
+  )
+
+cor_decomp <- data_pred_sp %>%
+  group_by(species_id, site) %>%
+  summarise(y = mean(y), y_pred_sp = mean(y_pred_decomp)) %>%
+  ungroup() %>%
+  group_by(species_id) %>%
+  summarise(r = cor(y, y_pred_sp))
+
+dat_cor_decomp <- data.frame(
+  r = c(cor_decomp$r, cor_temp_decomp$r_med),
+  type = rep(
+    c("Species-wide", "Population-level"),
+    each = length(cor_sp$r)
+  )
+)
+
+g_pred3 <- ggplot(dat_cor_decomp) +
+  geom_violin(aes(x = type, y = r), linewidth = 1.5) +
+  geom_quasirandom(aes(x = type, y = r, color = type), alpha = 0.5, size = 2) +
+  scale_color_manual(
+    values = c(
+      "Species-wide" = "#763626",
+      "Population-level" = "#90AFC5"
+    )
+  ) +
+  labs(y = "Prediction Correlation", x = "Prediction Type") +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.title = element_text(size = 10),
+    legend.position = "none"
+  ) +
+  scale_y_continuous(
+    limits = c(-1, 1),
+    breaks = c(-0.9, -0.6, -0.3, 0, 0.3, 0.6, 0.9)
+  )
+
 # Proportion of sites with temporal cor > 0.5
 d <- data_pred_sp %>%
   group_by(species_id, site) %>%
@@ -605,7 +673,8 @@ plots_dbo <- list(
   g4 = g4,
   g_imp = g_imp,
   g_pred = g_pred,
-  g_pred2 = g_pred2
+  g_pred2 = g_pred2,
+  g_pred3 = g_pred3
 )
 
 saveRDS(plots_dbo, "plots_dbo.rds")
