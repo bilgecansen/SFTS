@@ -144,11 +144,45 @@ data_fam_gc3 <- filter(data_fam_gc2, family %in% site_n$family) %>%
 idx0 <- which(data_fam_gc3$biomass == 0)
 data_fam_gc4 <- data_fam_gc3[-idx0, ]
 
+# Add lags to env data
+z <- select(
+  data_env_sel,
+  -CruiseID,
+  -StationNum,
+  -uniqueID,
+  -DataDate,
+  -Latitude,
+  -Longitude,
+  -Depth,
+  -DBOreg
+)
+
+stations <- unique(z$StationNme)
+
+z2 <- foreach(i = 1:length(stations), .combine = "rbind") %do%
+  {
+    filter(z, StationNme == stations[i]) %>%
+      filter(DataYear != max(DataYear))
+  }
+z2 <- z2[order(z2$DataYear), ]
+
+z3 <- foreach(i = 1:length(stations), .combine = "rbind") %do%
+  {
+    filter(data_env_sel, StationNme == stations[i]) %>%
+      filter(DataYear != min(DataYear))
+  }
+z3 <- z3[order(z3$DataYear), ]
+
+z2$DataYear <- z3$DataYear
+colnames(z2)[-(1:2)] <- paste(colnames(z2)[-(1:2)], "lag", sep = "_")
+
+data_env_sel2 <- cbind(z3, z2[, -(1:2)])
+
 # decompose data for RF
 ## these covariates vary across space and time and we should decompose them
-decomp_vars <- colnames(data_env_sel)[-(1:10)]
+decomp_vars <- colnames(data_env_sel2)[-(1:10)]
 
-data_env_dec <- data_env_sel %>%
+data_env_dec <- data_env_sel2 %>%
   # center without scaling
   dplyr::mutate(across(all_of(decomp_vars), ~ scale(., scale = FALSE)[, 1])) %>%
 
@@ -193,7 +227,7 @@ data_env_dec <- data_env_sel %>%
 
 # Biomass RF models -------------------------------------------------------
 
-data_rf <- left_join(
+data_rf <- inner_join(
   data_fam_gc4,
   data_env_dec,
   by = c("StationNme", "DataYear")
@@ -291,7 +325,8 @@ data_rf_sp <- map(
       Latitude,
       Longitude,
       Depth,
-      contains("spatial")
+      contains("spatial"),
+      -contains("lag")
     )
 )
 
@@ -307,7 +342,8 @@ data_rf_decomp <- map(
       Latitude,
       Longitude,
       Depth,
-      contains(c("spatial", "temporal", "residual"))
+      contains(c("spatial", "temporal", "residual")),
+      -contains("lag_spatial")
     )
 )
 
@@ -330,7 +366,10 @@ data_pred <- foreach(i = 1:length(families)) %do%
 
     foreach(t = 1:length(years), .combine = "rbind") %do%
       {
-        dat_train_sp <- filter(data_rf_sp[[i]], DataYear != years[t]) %>%
+        dat_train_sp <- filter(
+          data_rf_sp[[i]],
+          DataYear != years[t]
+        ) %>%
           select(-StationNme, -DataYear)
 
         dat_train_sptemp <- filter(
@@ -345,10 +384,14 @@ data_pred <- foreach(i = 1:length(families)) %do%
         ) %>%
           select(-StationNme, -DataYear)
 
-        dat_test_sp <- filter(data_rf_test[[i]], DataYear == years[t]) %>%
+        dat_test_sp <- filter(
+          data_rf_test[[i]],
+          DataYear == years[t]
+        ) %>%
           select(
             -family,
             -contains(c("spatial", "temporal", "residual")),
+            -contains("lag")
           )
 
         colnames(dat_test_sp)[-(1:7)] <- paste(
@@ -357,7 +400,10 @@ data_pred <- foreach(i = 1:length(families)) %do%
           sep = "_"
         )
 
-        dat_test_sptemp <- filter(data_rf_test[[i]], DataYear == years[t]) %>%
+        dat_test_sptemp <- filter(
+          data_rf_test[[i]],
+          DataYear == years[t]
+        ) %>%
           as.data.frame()
 
         res_rf_sp <- ranger(
@@ -411,15 +457,13 @@ data_pred <- foreach(i = 1:length(families)) %do%
       }
   }
 
-pred_r <- map_dbl(data_pred, function(x) cor(x$y_pred_sp, x$y))
-
-plot_pred <- function(i) {
+plot_pred <- function(i, y_pred) {
   z <- data_pred[[i]]
 
   ggplot(z) +
     geom_line(
       aes(
-        x = y_pred_sp,
+        x = {{ y_pred }},
         y = y,
         group = site
       ),
@@ -432,9 +476,9 @@ plot_pred <- function(i) {
     ) +
     geom_point(
       data = group_by(z, site) %>%
-        summarise(y_pred = mean(y_pred_sp), y = mean(y)),
+        summarise(pred = mean({{ y_pred }}), y = mean(y)),
       aes(
-        x = y_pred,
+        x = pred,
         y = y,
         group = site
       ),
@@ -443,8 +487,6 @@ plot_pred <- function(i) {
       alpha = 0.5,
       size = 2
     ) +
-    #scale_y_continuous(limits = c(0, 1)) +
-    #scale_x_continuous(limits = c(0, 1)) +
     labs(
       title = families[i],
       y = "Observed Biomass",
@@ -461,177 +503,69 @@ plot_pred <- function(i) {
     )
 }
 
-order(pred_r, decreasing = T)
+g1 <- plot_pred(11, y_pred_sp)
+g2 <- plot_pred(11, y_pred_sptemp)
+g3 <- plot_pred(11, y_pred_decomp)
 
-for (i in 1:length(pred_r)) print(plot_pred(i))
+# Correlation comparison for SFTS
+plot_sp_multi <- function(y_pred) {
+  data_pred_sp <- do.call(rbind, data_pred)
 
-g1 <- plot_pred(56)
-g2 <- plot_pred(14)
-
-# Correlation comparison
-data_pred_sp <- do.call(rbind, data_pred)
-
-cor_temp <- data_pred_sp %>%
-  group_by(species_id, site) %>%
-  summarise(r = cor(y, y_pred_sp)) %>%
-  ungroup() %>%
-  group_by(species_id) %>%
-  summarise(
-    r_med = median(r[!is.na(r)]),
-    r_min = quantile(r[!is.na(r)], 0.05),
-    r_max = quantile(r[!is.na(r)], 0.95)
-  )
-
-cor_sp <- data_pred_sp %>%
-  group_by(species_id, site) %>%
-  summarise(y = mean(y), y_pred = mean(y_pred_sp)) %>%
-  ungroup() %>%
-  group_by(species_id) %>%
-  summarise(r = cor(y, y_pred))
-
-dat_cor <- data.frame(
-  r = c(cor_sp$r, cor_temp$r_med),
-  type = rep(
-    c("Species-wide", "Population-level"),
-    each = length(cor_sp$r)
-  )
-)
-
-g_pred <- ggplot(dat_cor) +
-  geom_violin(aes(x = type, y = r), linewidth = 1.5) +
-  geom_quasirandom(aes(x = type, y = r, color = type), alpha = 0.5, size = 2) +
-  scale_color_manual(
-    values = c(
-      "Species-wide" = "#763626",
-      "Population-level" = "#90AFC5"
+  cor_temp <- data_pred_sp %>%
+    group_by(species_id, site) %>%
+    summarise(r = cor(y, {{ y_pred }})) %>%
+    ungroup() %>%
+    group_by(species_id) %>%
+    summarise(
+      r_med = median(r[!is.na(r)]),
+      r_min = quantile(r[!is.na(r)], 0.05),
+      r_max = quantile(r[!is.na(r)], 0.95)
     )
-  ) +
-  labs(y = "Prediction Correlation", x = "Prediction Type") +
-  theme(
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
-    #axis.title.x = element_text(margin = margin(t = 10)),
-    #axis.title.y = element_text(margin = margin(r = 10)),
-    axis.title = element_text(size = 10),
-    legend.position = "none"
-  ) +
-  scale_y_continuous(
-    limits = c(-1, 1),
-    breaks = c(-0.9, -0.6, -0.3, 0, 0.3, 0.6, 0.9)
-  )
 
-# Correlation comparison for spatio-temporal models
-cor_temp_sptemp <- data_pred_sp %>%
-  group_by(species_id, site) %>%
-  summarise(r = cor(y, y_pred_sptemp)) %>%
-  ungroup() %>%
-  group_by(species_id) %>%
-  summarise(
-    r_med = median(r[!is.na(r)]),
-    r_min = quantile(r[!is.na(r)], 0.05),
-    r_max = quantile(r[!is.na(r)], 0.95)
-  )
+  cor_sp <- data_pred_sp %>%
+    group_by(species_id, site) %>%
+    summarise(y = mean(y), y_pred_sp = mean({{ y_pred }})) %>%
+    ungroup() %>%
+    group_by(species_id) %>%
+    summarise(r = cor(y, y_pred_sp))
 
-cor_sptemp <- data_pred_sp %>%
-  group_by(species_id, site) %>%
-  summarise(y = mean(y), y_pred_sp = mean(y_pred_sptemp)) %>%
-  ungroup() %>%
-  group_by(species_id) %>%
-  summarise(r = cor(y, y_pred_sp))
-
-dat_cor_sptemp <- data.frame(
-  r = c(cor_sptemp$r, cor_temp_sptemp$r_med),
-  type = rep(
-    c("Species-wide", "Population-level"),
-    each = length(cor_sp$r)
-  )
-)
-
-g_pred2 <- ggplot(dat_cor_sptemp) +
-  geom_violin(aes(x = type, y = r), linewidth = 1.5) +
-  geom_quasirandom(aes(x = type, y = r, color = type), alpha = 0.5, size = 2) +
-  scale_color_manual(
-    values = c(
-      "Species-wide" = "#763626",
-      "Population-level" = "#90AFC5"
+  dat_cor <- data.frame(
+    r = c(cor_sp$r, cor_temp$r_med),
+    type = rep(
+      c("Species-wide", "Population-level"),
+      each = length(cor_sp$r)
     )
-  ) +
-  labs(y = "Prediction Correlation", x = "Prediction Type") +
-  theme(
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
-    axis.title = element_text(size = 10),
-    legend.position = "none"
-  ) +
-  scale_y_continuous(
-    limits = c(-1, 1),
-    breaks = c(-0.9, -0.6, -0.3, 0, 0.3, 0.6, 0.9)
   )
 
-# Correlation comparison for decomposed models
-cor_temp_decomp <- data_pred_sp %>%
-  group_by(species_id, site) %>%
-  summarise(r = cor(y, y_pred_decomp)) %>%
-  ungroup() %>%
-  group_by(species_id) %>%
-  summarise(
-    r_med = median(r[!is.na(r)]),
-    r_min = quantile(r[!is.na(r)], 0.05),
-    r_max = quantile(r[!is.na(r)], 0.95)
-  )
-
-cor_decomp <- data_pred_sp %>%
-  group_by(species_id, site) %>%
-  summarise(y = mean(y), y_pred_sp = mean(y_pred_decomp)) %>%
-  ungroup() %>%
-  group_by(species_id) %>%
-  summarise(r = cor(y, y_pred_sp))
-
-dat_cor_decomp <- data.frame(
-  r = c(cor_decomp$r, cor_temp_decomp$r_med),
-  type = rep(
-    c("Species-wide", "Population-level"),
-    each = length(cor_sp$r)
-  )
-)
-
-g_pred3 <- ggplot(dat_cor_decomp) +
-  geom_violin(aes(x = type, y = r), linewidth = 1.5) +
-  geom_quasirandom(aes(x = type, y = r, color = type), alpha = 0.5, size = 2) +
-  scale_color_manual(
-    values = c(
-      "Species-wide" = "#763626",
-      "Population-level" = "#90AFC5"
+  ggplot(dat_cor) +
+    geom_violin(aes(x = type, y = r), linewidth = 1.5) +
+    geom_quasirandom(
+      aes(x = type, y = r, color = type),
+      alpha = 0.5,
+      size = 2
+    ) +
+    scale_color_manual(
+      values = c(
+        "Species-wide" = "#763626",
+        "Population-level" = "#90AFC5"
+      )
+    ) +
+    labs(y = "Prediction Correlation", x = "Prediction Type") +
+    theme(
+      panel.grid.minor = element_blank(),
+      panel.border = element_blank(),
+      axis.title = element_text(size = 10),
+      legend.position = "none"
+    ) +
+    scale_y_continuous(
+      limits = c(-1.01, 1),
+      breaks = c(-0.6, -0.3, 0, 0.3, 0.6, 0.9)
     )
-  ) +
-  labs(y = "Prediction Correlation", x = "Prediction Type") +
-  theme(
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
-    axis.title = element_text(size = 10),
-    legend.position = "none"
-  ) +
-  scale_y_continuous(
-    limits = c(-1, 1),
-    breaks = c(-0.9, -0.6, -0.3, 0, 0.3, 0.6, 0.9)
-  )
+}
 
-# Proportion of sites with temporal cor > 0.5
-d <- data_pred_sp %>%
-  group_by(species_id, site) %>%
-  summarise(r = cor(y, y_pred_sp)) %>%
-  ungroup() %>%
-  group_by(species_id) %>%
-  summarise(n = length(which(r >= 0.5)) / length(r))
-
-g3 <- ggplot(data = d) +
-  geom_histogram(aes(n), color = "#90AFC5", fill = "#763626", alpha = 0.8) +
-  theme(
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),
-    axis.title = element_text(size = 10)
-  ) +
-  labs(y = "Frequency", x = "Proportion of sites with r > 0.5")
+g_pred1 <- plot_sp_multi(y_pred_sp)
+g_pred2 <- plot_sp_multi(y_pred_sptemp)
+g_pred3 <- plot_sp_multi(y_pred_decomp)
 
 # Component variability plot
 v <- distinct(
@@ -672,7 +606,7 @@ plots_dbo <- list(
   g3 = g3,
   g4 = g4,
   g_imp = g_imp,
-  g_pred = g_pred,
+  g_pred1 = g_pred1,
   g_pred2 = g_pred2,
   g_pred3 = g_pred3
 )
