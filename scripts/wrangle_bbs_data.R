@@ -379,100 +379,6 @@ bbs_str <- bbs_all$routes %>%
   dplyr::select(site_id, year, strata)
 
 
-# Process global climate data ---------------------------------------------
-
-# Atlantic multidecadal oscillation
-amo <- read.table("data/amo.txt", sep = "", skip = 1, header = F) %>%
-  filter(V1 >= 1981 & V1 <= 2023)
-colnames(amo) <- c(
-  "year",
-  "J",
-  "F",
-  "M",
-  "A",
-  "M",
-  "J",
-  "J",
-  "A",
-  "S",
-  "O",
-  "N",
-  "D"
-)
-amo <- as.matrix(amo)
-amo_sp <- foreach(i = 1:(nrow(amo) - 1), .combine = "rbind") %do%
-  {
-    data.frame(
-      year = amo[i + 1, 1],
-      amo = round(mean(amo[i + 1, 4:6]), 3),
-      amo_lag = round(mean(amo[i, 4:6]), 3)
-    )
-  }
-
-# El-Nino southern oscillation
-enso <- read.csv("data/censo.csv")
-enso$year <- as.numeric(str_split_i(enso$Date, "-", 1))
-enso$month <- as.numeric(str_split_i(enso$Date, "-", 2))
-enso <- enso[, -1]
-colnames(enso)[1] <- "censo"
-enso <- pivot_wider(enso, names_from = "month", values_from = "censo") %>%
-  filter(year >= 1981 & year <= 2023)
-colnames(enso) <- c(
-  "year",
-  "J",
-  "F",
-  "M",
-  "A",
-  "M",
-  "J",
-  "J",
-  "A",
-  "S",
-  "O",
-  "N",
-  "D"
-)
-
-enso <- as.matrix(enso)
-enso_sp <- foreach(i = 1:(nrow(enso) - 1), .combine = "rbind") %do%
-  {
-    data.frame(
-      year = enso[i + 1, 1],
-      enso = round(mean(enso[i + 1, 4:6]), 3),
-      enso_lag = round(mean(enso[i, 4:6]), 3)
-    )
-  }
-
-# Pacific decadal oscillation
-pdo <- read.table("data/pdo.txt", sep = "", skip = 1, header = T) %>%
-  filter(Year >= 1981 & Year <= 2023)
-
-pdo <- as.matrix(pdo)
-pdo_sp <- foreach(i = 1:(nrow(pdo) - 1), .combine = "rbind") %do%
-  {
-    data.frame(
-      year = pdo[i + 1, 1],
-      pdo = round(mean(pdo[i + 1, 4:6]), 3),
-      pdo_lag = round(mean(pdo[i, 4:6]), 3)
-    )
-  }
-
-# North Atlantic oscillation
-nao <- read.table("data/nao.txt", header = T)
-nao$year <- as.numeric(rownames(nao))
-nao <- filter(nao, year >= 1981 & year <= 2023)
-
-nao <- as.matrix(nao)
-nao_sp <- foreach(i = 1:(nrow(nao) - 1), .combine = "rbind") %do%
-  {
-    data.frame(
-      year = nao[i + 1, 13],
-      nao = round(mean(nao[i + 1, 3:5]), 3),
-      nao_lag = round(mean(nao[i, 3:5]), 3)
-    )
-  }
-
-
 # Combine all data --------------------------------------------------------
 
 # remove large objects to ease memory
@@ -486,22 +392,14 @@ bbs_final <-
   left_join(bbs_str, by = c("site_id", "year")) %>%
   filter(year >= 1982 & year <= 2023) %>%
   left_join(env_data, by = c("site_id", "year"), copy = T) %>%
-  filter(!is.na(bio1_lag), !is.na(elevs)) %>%
-  left_join(amo_sp, by = "year") %>%
-  left_join(enso_sp, by = "year") %>%
-  left_join(pdo_sp, by = "year") %>%
-  left_join(nao_sp, by = "year")
+  filter(!is.na(bio1_lag), !is.na(elevs))
 
 bbs_final_nozero <-
   left_join(bbs2, bbs_eff, by = c("site_id", "year")) %>%
   left_join(bbs_str, by = c("site_id", "year")) %>%
   filter(year >= 1982 & year <= 2023) %>%
   left_join(env_data, by = c("site_id", "year"), copy = T) %>%
-  filter(!is.na(bio1_lag), !is.na(elevs)) %>%
-  left_join(amo_sp, by = "year") %>%
-  left_join(enso_sp, by = "year") %>%
-  left_join(pdo_sp, by = "year") %>%
-  left_join(nao_sp, by = "year")
+  filter(!is.na(bio1_lag), !is.na(elevs))
 
 
 saveRDS(bbs_final, "data/data_bbs.rds")

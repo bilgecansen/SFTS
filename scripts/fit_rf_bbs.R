@@ -442,4 +442,4 @@ plots_bbs <- list(
   g_pred3 = g_pred3
 )
 
-saveRDS(plots_bbs, "plots_bbs.rds")
+saveRDS(plots_bbs, "figures/plots_bbs.rds")

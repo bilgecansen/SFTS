@@ -353,7 +353,7 @@ data_rf_sptemp <- map(
     select(
       x,
       -contains(c("spatial", "temporal", "residual")),
-      -family
+      -family,
     )
 )
 
@@ -370,19 +370,19 @@ data_pred <- foreach(i = 1:length(families)) %do%
           data_rf_sp[[i]],
           DataYear != years[t]
         ) %>%
-          select(-StationNme, -DataYear)
+          select(-DataYear)
 
         dat_train_sptemp <- filter(
           data_rf_sptemp[[i]],
           DataYear != years[t]
         ) %>%
-          select(-StationNme, -DataYear)
+          select(-DataYear)
 
         dat_train_decomp <- filter(
           data_rf_decomp[[i]],
           DataYear != years[t]
         ) %>%
-          select(-StationNme, -DataYear)
+          select(-DataYear)
 
         dat_test_sp <- filter(
           data_rf_test[[i]],
@@ -426,17 +426,17 @@ data_pred <- foreach(i = 1:length(families)) %do%
 
         y_pred_sp <- predict(
           res_rf_sp,
-          data = select(dat_test_sp, -StationNme, -DataYear)
+          data = select(dat_test_sp, -DataYear)
         )
 
         y_pred_decomp <- predict(
           res_rf_decomp,
-          data = select(dat_test_sptemp, -StationNme, -DataYear)
+          data = select(dat_test_sptemp, -DataYear)
         )
 
         y_pred_sptemp <- predict(
           res_rf_sptemp,
-          data = select(dat_test_sptemp, -StationNme, -DataYear)
+          data = select(dat_test_sptemp, -DataYear)
         )
 
         y_pred_sp <- (y_pred_sp$predictions)
@@ -496,8 +496,8 @@ plot_pred <- function(i, y_pred) {
       legend.position = "none",
       panel.grid.minor = element_blank(),
       panel.border = element_blank(),
-      axis.title.x = element_text(margin = margin(t = 10)),
-      axis.title.y = element_text(margin = margin(r = 10)),
+      #axis.title.x = element_text(margin = margin(t = 10)),
+      #axis.title.y = element_text(margin = margin(r = 10)),
       axis.title = element_text(size = 10),
       plot.title = element_text(hjust = 0.5)
     )
@@ -611,4 +611,4 @@ plots_dbo <- list(
   g_pred3 = g_pred3
 )
 
-saveRDS(plots_dbo, "plots_dbo.rds")
+saveRDS(plots_dbo, "figures/plots_dbo.rds")
