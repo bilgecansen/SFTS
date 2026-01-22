@@ -176,7 +176,7 @@ get_prism_data <- function(bbs_data) {
     tidyr::extract(
       date,
       c("clim_var", "year", "month"),
-      "PRISM_([[:alpha:]]*)_stable_[[:alnum:]]*_([[:digit:]]{4})([[:digit:]]{2})_"
+      "prism_([a-z]+)_.*_([0-9]{4})([0-9]{2})"
     )
 
   # Format the data a little
