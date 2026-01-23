@@ -153,7 +153,7 @@ g_imp <- ggplot(med_imp_str) +
 g_imp
 
 
-# Predict test set with space only models ---------------------------------
+# Predict test set with space and spatio-temporal models ------------------
 
 data_rf_sp <- map(
   data_rf_str,

@@ -311,7 +311,7 @@ g_imp <- ggplot(med_imp_fam) +
   )
 
 
-# Cross-validation with space only models ---------------------------------
+# Cross-validation with space and spatiotemporal models -------------------
 
 data_rf_sp <- map(
   data_rf,
