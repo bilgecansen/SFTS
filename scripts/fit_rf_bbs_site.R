@@ -1,24 +1,27 @@
-# Random-forest counterpart to fit_gam_bbs.R -- same data, filters, train/test
-# split and metrics, but ranger random forests instead of mgcv GAMs.
+# SITE-LEVEL counterpart to fit_rf_bbs.R. Identical data, models, split and
+# metrics, but the population unit is the individual BBS route (site_id) rather
+# than the state x BCR stratum -- i.e. NO averaging of sites within a stratum.
+# This is the finest-grain ("robustness") version of the main RF analysis:
+# strata-level stays the main result, and this shows whether the same pattern
+# holds at the route level. GAMs are not run at site level (RF only).
 #
-# Three model types (no SVC: random forests have no random-effect analog):
+# The underlying file is already at species x site x year grain and the
+# spatial/temporal/residual climate decomposition is already computed per site,
+# so the only change from fit_rf_bbs.R is the aggregation key (strata -> site_id)
+# and the population-count filter (min_strata -> min_sites). Response is
+# log(abundance); zeros are excluded (nozero file), so a site "population" is the
+# run of years that route detected the species.
+#
+# Three model types (no SVC):
 #   static     : spatial (climatological) components only, projected onto the
 #                test year's actual climate (raw bio renamed to _spatial)
 #   dynamic    : raw, undecomposed climate
 #   decomposed : spatial + temporal + residual
 #
-# Controls are elevs + party_hours. lat/long are not used, and strata (site
-# identity) is never a predictor -- it only filters species to those occupying
-# >= min_strata populations (15), so the species-wide correlation is taken over
-# enough populations to be reliable. Climate set: the 8 bioclim variables shared
-# with fit_gam_bbs.R. Response is log(abundance).
-#
-# Test is always 2011-2020. Two training regimes are run:
-#   standard : train year < 2011  (training abuts the test period)
-#   buffer   : train year < 2001, 2001-2010 dropped entirely -- a 10-year gap so
-#              test skill cannot come from short-range temporal autocorrelation
-#              bleeding across the boundary; forces genuine transfer across time.
-# Reports species-wide vs population-level correlation on the test predictions.
+# Controls are elevs + party_hours. Test is always 2011-2020. Two training
+# regimes are run:
+#   standard : train year < 2011
+#   buffer   : train year < 2001, 2001-2010 dropped entirely.
 
 library(tidyverse)
 library(ranger)
@@ -27,7 +30,7 @@ library(foreach)
 LIMIT <- as.numeric(Sys.getenv("LIMIT", "Inf"))   # set small for a timing probe
 n_trees <- 1000
 min_test_years <- 5
-min_strata <- 15   # species must occupy >= this many populations (strata)
+min_sites <- 15   # species must occupy >= this many populations (sites/routes)
 
 vars <- c("bio2", "bio3", "bio5", "bio8", "bio9", "bio15", "bio16", "bio18")
 comp_terms <- as.vector(t(outer(vars,
@@ -36,15 +39,17 @@ comp_terms <- as.vector(t(outer(vars,
 bbs <- readRDS("data/data_bbs_nozero.rds")
 
 keep <- c("abundance", "elevs", "party_hours", vars, comp_terms)
+# each (site_id, year) is already a single row, so the group/summarise is an
+# identity -- kept in this form so the only difference from fit_rf_bbs.R's agg()
+# is the grouping key (strata -> site_id).
 agg <- function(df, sp) {
   filter(df, species_id == sp) %>%
-    group_by(strata, year) %>%
+    group_by(site_id, year) %>%
     summarise(across(all_of(keep), mean), .groups = "drop")
 }
 
 
 # Model predictor sets (response = log(abundance)) ------------------------
-# Explicit RHS avoids the formula "." picking up unintended columns.
 
 f_static <- as.formula(paste("log(abundance) ~",
   paste(c("elevs", "party_hours", paste0(vars, "_spatial")), collapse = " + ")))
@@ -54,29 +59,28 @@ f_decomp <- as.formula(paste("log(abundance) ~",
   paste(c("elevs", "party_hours", comp_terms), collapse = " + ")))
 
 
-# Metrics (as in fit_gam_bbs.R) -------------------------------------------
+# Metrics -- population unit is now the site --------------------------------
 
-plcor <- function(strata, y, pred) {
-  tibble(strata, y, pred) %>%
-    group_by(strata) %>%
+plcor <- function(site, y, pred) {
+  tibble(site, y, pred) %>%
+    group_by(site) %>%
     summarise(r = suppressWarnings(cor(y, pred)), .groups = "drop") %>%
     pull(r) %>%
     median(na.rm = TRUE)
 }
-swcor <- function(strata, y, pred) {
-  s <- tibble(strata, y, pred) %>%
-    group_by(strata) %>%
+swcor <- function(site, y, pred) {
+  s <- tibble(site, y, pred) %>%
+    group_by(site) %>%
     summarise(o = mean(y), p = mean(pred), .groups = "drop")
   suppressWarnings(cor(s$o, s$p))
 }
 
 
 # Fit the three models for a given training regime ------------------------
-# train_cutoff : train on year < train_cutoff. Test is always 2011-2020, so a
-# cutoff of 2001 leaves 2001-2010 as an unused buffer gap. Filters (>=5 non-zero
-# years/site, >=5 sites/species) are applied to the training set of that regime.
+# Filters (>=5 non-zero years/site, >=5 sites/species) are applied to the
+# training set of that regime, exactly as in fit_rf_bbs.R.
 
-run_rf_bbs <- function(train_cutoff, out_path, tag) {
+run_rf_bbs_site <- function(train_cutoff, out_path, tag) {
   bbs_train <- filter(bbs, year < train_cutoff)
   bbs_test <- filter(bbs, year >= 2011 & year < 2021)
 
@@ -94,7 +98,7 @@ run_rf_bbs <- function(train_cutoff, out_path, tag) {
   species <- unique(bbs_train3$species_id)
 
   n_run <- min(LIMIT, length(species))
-  cat(sprintf("\nRF BBS [%s]: %d species (of %d), 3 models, %d trees, train<%d test 2011-2020\n",
+  cat(sprintf("\nRF BBS SITE [%s]: %d species (of %d), 3 models, %d trees, train<%d test 2011-2020\n",
     tag, n_run, length(species), n_trees, train_cutoff))
   flush.console()
   t0 <- Sys.time()
@@ -103,8 +107,8 @@ run_rf_bbs <- function(train_cutoff, out_path, tag) {
     sp <- species[i]
     tr <- agg(bbs_train3, sp)
     te <- agg(bbs_test, sp) %>%
-      filter(strata %in% unique(tr$strata)) %>%
-      group_by(strata) %>%
+      filter(site_id %in% unique(tr$site_id)) %>%
+      group_by(site_id) %>%
       filter(n() >= min_test_years) %>%
       ungroup()
 
@@ -113,10 +117,10 @@ run_rf_bbs <- function(train_cutoff, out_path, tag) {
         as.numeric(difftime(Sys.time(), t0, units = "secs"))))
       flush.console()
     }
-    if (n_distinct(tr$strata) < min_strata || nrow(te) < min_test_years) return(NULL)
+    if (n_distinct(tr$site_id) < min_sites || nrow(te) < min_test_years) return(NULL)
 
-    # static is projected onto the test year's actual climate by feeding the raw
-    # bio values in under the _spatial names (as fit_gam_bbs.R does)
+    # static projected onto the test year's actual climate (raw bio fed in under
+    # the _spatial names), as in fit_rf_bbs.R
     te_static <- te
     te_static[paste0(vars, "_spatial")] <- te[vars]
 
@@ -129,10 +133,10 @@ run_rf_bbs <- function(train_cutoff, out_path, tag) {
       p_dynamic <- pr(rf(f_dynamic, tr), te)
       p_decomp <- pr(rf(f_decomp, tr), te)
       tibble(
-        species_id = sp, n_strata = n_distinct(tr$strata),
-        static_sw = swcor(te$strata, y, p_static), static_pl = plcor(te$strata, y, p_static),
-        dynamic_sw = swcor(te$strata, y, p_dynamic), dynamic_pl = plcor(te$strata, y, p_dynamic),
-        decomp_sw = swcor(te$strata, y, p_decomp), decomp_pl = plcor(te$strata, y, p_decomp)
+        species_id = sp, n_sites = n_distinct(tr$site_id),
+        static_sw = swcor(te$site_id, y, p_static), static_pl = plcor(te$site_id, y, p_static),
+        dynamic_sw = swcor(te$site_id, y, p_dynamic), dynamic_pl = plcor(te$site_id, y, p_dynamic),
+        decomp_sw = swcor(te$site_id, y, p_decomp), decomp_pl = plcor(te$site_id, y, p_decomp)
       )
     }, error = function(e) NULL)
   }
@@ -141,7 +145,8 @@ run_rf_bbs <- function(train_cutoff, out_path, tag) {
 
   q <- function(x) sprintf("%.2f (%.2f - %.2f)", median(x, na.rm = TRUE),
     quantile(x, 0.05, na.rm = TRUE), quantile(x, 0.95, na.rm = TRUE))
-  cat(sprintf("\n=== BBS RFs [%s] (%d species): test 2011-2020 ===\n", tag, nrow(res)))
+  cat(sprintf("\n=== BBS RFs SITE [%s] (%d species): test 2011-2020 ===\n", tag, nrow(res)))
+  cat(sprintf("median sites/species: %.0f\n", median(res$n_sites)))
   cat(sprintf("%-16s %-22s %-22s\n", "Model", "Species-wide (test)", "Pop-level (test)"))
   cat(sprintf("%-16s %-22s %-22s\n", "RF static", q(res$static_sw), q(res$static_pl)))
   cat(sprintf("%-16s %-22s %-22s\n", "RF dynamic", q(res$dynamic_sw), q(res$dynamic_pl)))
@@ -153,5 +158,5 @@ run_rf_bbs <- function(train_cutoff, out_path, tag) {
 
 # Run both regimes --------------------------------------------------------
 
-run_rf_bbs(2011, "data/rf_bbs_results.rds", "standard")
-run_rf_bbs(2001, "data/rf_bbs_buffer_results.rds", "buffer: 2001-2010 dropped")
+run_rf_bbs_site(2011, "data/rf_bbs_site_results.rds", "standard")
+run_rf_bbs_site(2001, "data/rf_bbs_site_buffer_results.rds", "buffer: 2001-2010 dropped")
