@@ -1,10 +1,10 @@
-# STRATA GAM, SPATIO-TEMPORAL BLOCK CV (main analysis). K spatial blocks per
-# species (k-means on strata centroids), leave-one-block-out: train on the other
-# blocks' pre-2011 data, predict the held-out block's 2011-2020, pool out-of-block
-# predictions, compute species-wide and population-level r. Four models as in
-# fit_gam_bbs.R, with the smooth-SVC form: because s(long,lat) is defined over
-# continuous space, the SVC is evaluated directly at the held-out block's strata
-# centroids (no random effects to zero). K=8, n_strata >= 25.
+# SITE-LEVEL GAM, SPATIO-TEMPORAL BLOCK CV. Same block-CV design as
+# fit_gam_bbs_spatialcv.R (K spatial blocks per species, leave-one-block-out, pool
+# out-of-block future predictions) but at the site level with the smooth-SVC form
+# (see fit_gam_bbs_site.R). The key difference from the strata SVC: the smooth
+# s(long,lat) fields are defined over continuous space, so for a HELD-OUT block the
+# SVC is simply evaluated at the unseen sites' coordinates (extrapolation toward
+# the block, not undefined) -- no random effects to zero. K=8, n_sites >= 25.
 
 library(tidyverse)
 library(mgcv)
@@ -12,8 +12,8 @@ library(foreach)
 
 LIMIT <- as.numeric(Sys.getenv("LIMIT", "Inf"))
 K <- as.numeric(Sys.getenv("K", "8"))
-min_strata_cv <- 25
-min_pool_strata <- 15
+min_sites_cv <- 25
+min_pool_sites <- 15
 min_test_years <- 5
 
 static_vars <- c("bio1", "bio12")
@@ -34,14 +34,14 @@ site_n <- bbs_train2 %>% group_by(species_id) %>%
   summarize(n = length(unique(site_id)), .groups = "drop") %>% filter(n > 4)
 bbs_train3 <- filter(bbs_train2, species_id %in% site_n$species_id)
 species <- unique(bbs_train3$species_id)
-coord <- bbs_train3 %>% group_by(species_id, strata) %>%
+coord <- bbs_train3 %>% group_by(species_id, site_id) %>%
   summarise(lat = mean(lat), long = mean(long), .groups = "drop")
 rm(bbs, bbs_train, bbs_train2)
 
 keep <- c("abundance", "elevs", "party_hours", "lat", "long",
   vars, static_vars, comp_terms, static_comp)
-agg <- function(df, sp, strata_keep) filter(df, species_id == sp, strata %in% strata_keep) %>%
-  group_by(strata, year) %>% summarise(across(all_of(keep), mean), .groups = "drop")
+agg <- function(df, sp, sites_keep) filter(df, species_id == sp, site_id %in% sites_keep) %>%
+  group_by(site_id, year) %>% summarise(across(all_of(keep), mean), .groups = "drop")
 
 sm <- function(x) paste(sprintf("s(%s)", x), collapse = " + ")
 ctrl <- "elevs + party_hours"
@@ -50,17 +50,17 @@ rhs_dynamic <- paste(sm(vars), "+", ctrl)
 rhs_decomp  <- paste(sm(comp_terms), "+", ctrl)
 rhs_svc_fix <- paste(sm(c(paste0(vars, "_spatial"), paste0(vars, "_temporal"))), "+", ctrl)
 
-plcor <- function(strata, y, pred) tibble(strata, y, pred) %>% group_by(strata) %>%
+plcor <- function(site, y, pred) tibble(site, y, pred) %>% group_by(site) %>%
   summarise(r = suppressWarnings(cor(y, pred)), .groups = "drop") %>% pull(r) %>% median(na.rm = TRUE)
-swcor <- function(strata, y, pred) { s <- tibble(strata, y, pred) %>% group_by(strata) %>%
+swcor <- function(site, y, pred) { s <- tibble(site, y, pred) %>% group_by(site) %>%
   summarise(o = mean(y), p = mean(pred), .groups = "drop"); suppressWarnings(cor(s$o, s$p)) }
 
 gfit <- function(f, dat) bam(f, data = dat, discrete = TRUE, method = "fREML")
 gp <- function(m, newd) as.numeric(predict(m, newd))
 
 n_run <- min(LIMIT, length(species))
-cat(sprintf("GAM smooth-SVC spatial block CV: K=%d, n_strata>=%d, %d candidate species\n",
-  K, min_strata_cv, length(species))); flush.console()
+cat(sprintf("GAM SITE spatial block CV: K=%d, n_sites>=%d, %d candidate species\n",
+  K, min_sites_cv, length(species))); flush.console()
 t0 <- Sys.time()
 
 res <- foreach(i = 1:n_run) %do% {
@@ -70,19 +70,19 @@ res <- foreach(i = 1:n_run) %do% {
     cat(sprintf("  %d/%d (%.0fs)\n", i, n_run,
       as.numeric(difftime(Sys.time(), t0, units = "secs")))); flush.console()
   }
-  if (nrow(co) < min_strata_cv) return(NULL)
+  if (nrow(co) < min_sites_cv) return(NULL)
   xy <- cbind(x = co$long * cos(mean(co$lat) * pi / 180), y = co$lat)
   km <- tryCatch({ set.seed(1); kmeans(xy, centers = K, nstart = 10) }, error = function(e) NULL)
   if (is.null(km)) return(NULL)
   co$block <- km$cluster
 
   pooled <- foreach(k = 1:K, .combine = bind_rows) %do% {
-    tr <- agg(bbs_train3, sp, co$strata[co$block != k]) %>% mutate(strata = factor(strata))
-    te <- agg(bbs_test, sp, co$strata[co$block == k]) %>%
-      group_by(strata) %>% filter(n() >= min_test_years) %>% ungroup()
-    nst <- n_distinct(tr$strata)
-    if (nst < 5 || nrow(te) < min_test_years) return(NULL)
-    k_sp <- min(30, nst - 1); k_by <- min(10, nst - 1)
+    tr <- agg(bbs_train3, sp, co$site_id[co$block != k])
+    te <- agg(bbs_test, sp, co$site_id[co$block == k]) %>%
+      group_by(site_id) %>% filter(n() >= min_test_years) %>% ungroup()
+    nsite <- n_distinct(tr$site_id)
+    if (nsite < 5 || nrow(te) < min_test_years) return(NULL)
+    k_sp <- min(60, nsite - 1); k_by <- min(25, nsite - 1)
     svc_int <- sprintf("s(long, lat, k=%d)", k_sp)
     svc_by  <- paste(sprintf("s(long, lat, by=%s, k=%d)", resid_terms, k_by), collapse = " + ")
     f_static <- as.formula(paste("log(abundance) ~", rhs_static))
@@ -90,29 +90,30 @@ res <- foreach(i = 1:n_run) %do% {
     f_decomp  <- as.formula(paste("log(abundance) ~", rhs_decomp))
     f_svc <- as.formula(paste("log(abundance) ~", rhs_svc_fix, "+", svc_int, "+", svc_by))
     te_static <- te; te_static[static_comp] <- te[static_vars]
-    tryCatch(tibble(strata = te$strata, year = te$year, y = log(te$abundance),
+    tryCatch(tibble(site_id = te$site_id, year = te$year, y = log(te$abundance),
       p_static  = gp(gfit(f_static, tr), te_static),
       p_dynamic = gp(gfit(f_dynamic, tr), te),
       p_decomp  = gp(gfit(f_decomp, tr), te),
       p_svc     = gp(gfit(f_svc, tr), te)), error = function(e) NULL)
   }
-  if (is.null(pooled) || n_distinct(pooled$strata) < min_pool_strata) return(NULL)
+  if (is.null(pooled) || n_distinct(pooled$site_id) < min_pool_sites) return(NULL)
 
-  tibble(species_id = sp, n_strata = nrow(co), n_pool = n_distinct(pooled$strata),
-    static_sw = swcor(pooled$strata, pooled$y, pooled$p_static), static_pl = plcor(pooled$strata, pooled$y, pooled$p_static),
-    dynamic_sw = swcor(pooled$strata, pooled$y, pooled$p_dynamic), dynamic_pl = plcor(pooled$strata, pooled$y, pooled$p_dynamic),
-    decomp_sw = swcor(pooled$strata, pooled$y, pooled$p_decomp), decomp_pl = plcor(pooled$strata, pooled$y, pooled$p_decomp),
-    svc_sw = swcor(pooled$strata, pooled$y, pooled$p_svc), svc_pl = plcor(pooled$strata, pooled$y, pooled$p_svc))
+  tibble(species_id = sp, n_sites = nrow(co), n_pool = n_distinct(pooled$site_id),
+    static_sw = swcor(pooled$site_id, pooled$y, pooled$p_static), static_pl = plcor(pooled$site_id, pooled$y, pooled$p_static),
+    dynamic_sw = swcor(pooled$site_id, pooled$y, pooled$p_dynamic), dynamic_pl = plcor(pooled$site_id, pooled$y, pooled$p_dynamic),
+    decomp_sw = swcor(pooled$site_id, pooled$y, pooled$p_decomp), decomp_pl = plcor(pooled$site_id, pooled$y, pooled$p_decomp),
+    svc_sw = swcor(pooled$site_id, pooled$y, pooled$p_svc), svc_pl = plcor(pooled$site_id, pooled$y, pooled$p_svc))
 }
 res <- bind_rows(res)
-saveRDS(res, sprintf("data/gam_bbs_spatialcv_k%d_results.rds", K))
+saveRDS(res, sprintf("data/gam_bbs_site_spatialcv_k%d_results.rds", K))
 
 q <- function(x) sprintf("%.2f (%.2f - %.2f)", median(x, na.rm = TRUE),
   quantile(x, 0.05, na.rm = TRUE), quantile(x, 0.95, na.rm = TRUE))
-cat(sprintf("\n\n=== GAM smooth-SVC spatial block CV (%d species, K=%d) ===\n", nrow(res), K))
+cat(sprintf("\n\n=== GAM SITE spatial block CV (%d species, n_sites>=%d, K=%d) ===\n", nrow(res), min_sites_cv, K))
+cat(sprintf("median pooled sites/species: %.0f\n\n", median(res$n_pool)))
 cat(sprintf("%-16s %-22s %-22s\n", "Model", "Species-wide (CV)", "Pop-level (CV)"))
 cat(sprintf("%-16s %-22s %-22s\n", "static (2)", q(res$static_sw), q(res$static_pl)))
 cat(sprintf("%-16s %-22s %-22s\n", "dynamic (8)", q(res$dynamic_sw), q(res$dynamic_pl)))
 cat(sprintf("%-16s %-22s %-22s\n", "decomposed (8)", q(res$decomp_sw), q(res$decomp_pl)))
 cat(sprintf("%-16s %-22s %-22s\n", "svc (smooth)", q(res$svc_sw), q(res$svc_pl)))
-cat(sprintf("\nsaved -> data/gam_bbs_spatialcv_k%d_results.rds\n", K))
+cat(sprintf("\nsaved -> data/gam_bbs_site_spatialcv_k%d_results.rds\n", K))
