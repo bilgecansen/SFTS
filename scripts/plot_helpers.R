@@ -52,15 +52,21 @@ library(patchwork)
     geom_errorbar(aes(ymin = q05, ymax = q95), width = 0.12, linewidth = 0.8, alpha = 0.45, colour = colr) +
     geom_linerange(aes(ymin = q25, ymax = q75), linewidth = 1.9, colour = colr) +
     geom_line(linewidth = 0.9, colour = colr) +
-    geom_point(size = 3, colour = colr) +
-    geom_label(aes(label = sprintf("%.2f", med)), colour = colr, fill = "white",
-      label.size = 0, label.padding = unit(0.1, "lines"), nudge_x = 0.17, size = 3.3) +
-    scale_y_continuous(breaks = scales::pretty_breaks(n = 5), expand = expansion(mult = c(0.06, 0.10))) +
+    geom_point(size = 3, colour = colr)
+  if (show_x)   # bottom / population-level: label nudged beside the point (tight, overlap ok)
+    g <- g + geom_label(aes(label = sprintf("%.2f", med)), colour = colr, fill = "white",
+      label.size = 0, label.padding = unit(0.08, "lines"), nudge_x = 0.2, size = 3.0)
+  else          # top / species-wide: label above the 95% cap (no overlap with band/line/point)
+    g <- g + geom_label(aes(y = q95, label = sprintf("%.2f", med)), colour = colr, fill = "white",
+      label.size = 0, label.padding = unit(0.08, "lines"), vjust = -0.35, size = 3.0)
+  g <- g +
+    scale_y_continuous(breaks = scales::pretty_breaks(n = 5),
+      expand = expansion(mult = if (show_x) c(0.08, 0.12) else c(0.06, 0.20))) +
     coord_cartesian(clip = "off") +
     labs(y = ylab) +
     theme_bw(base_size = 12) +
     theme(axis.title.x = element_blank(),
-      axis.text.y = element_text(size = 12), axis.title.y = element_text(size = 11.5, margin = margin(r = 8)),
+      axis.text.y = element_text(size = 12), axis.title.y = element_text(size = 10, margin = margin(r = 2)),
       panel.grid.minor = element_blank(), panel.grid.major.x = element_blank(),
       panel.border = element_rect(colour = "grey80", fill = NA, linewidth = 0.5),
       plot.margin = margin(t = 6, r = 14, b = 6, l = 4))
@@ -72,10 +78,13 @@ library(patchwork)
 #            {static, dynamic, decomp, svc}. model_lv selects/orders the models.
 make_medband <- function(res_path, out_stem, title, model_lv, fig_width = 175) {
   d <- .sfts_summ(res_path, model_lv)
-  g_sw <- .sfts_panel(filter(d, metric == "sw"), .sfts_cols["sw"], "Species-wide\ncorrelation (r)", FALSE, zero_line = FALSE) +
+  g_sw <- .sfts_panel(filter(d, metric == "sw"), .sfts_cols["sw"], "Species-wide", FALSE, zero_line = FALSE) +
     ggtitle(title) + theme(plot.title = element_text(size = 12))
-  g_pl <- .sfts_panel(filter(d, metric == "pl"), .sfts_cols["pl"], "Population-level\ncorrelation (r)", TRUE, zero_line = TRUE)
-  p <- g_sw / g_pl + plot_layout(heights = c(1.6, 1))
+  g_pl <- .sfts_panel(filter(d, metric == "pl"), .sfts_cols["pl"], "Population-level", TRUE, zero_line = TRUE)
+  p_main <- g_sw / g_pl + plot_layout(heights = c(1.6, 1))
+  ylab_col <- patchwork::wrap_elements(grid::textGrob("Correlation (r)", rot = 90,
+    gp = grid::gpar(fontsize = 13)))
+  p <- patchwork::wrap_plots(ylab_col, p_main, widths = c(1, 26))
   ggsave(sprintf("figures/%s.pdf", out_stem), p, width = fig_width, height = 190, units = "mm", dpi = 600)
   ggsave(sprintf("figures/%s.png", out_stem), p, width = fig_width, height = 190, units = "mm", dpi = 600)
   cat(sprintf("saved -> figures/%s.png\n", out_stem))
@@ -180,10 +189,13 @@ make_medband_grid <- function(paths, treatments, out_stem, model_lv,
 make_medband_split <- function(sw_path, pl_path, out_stem, title, model_lv, fig_width = 175) {
   d_sw <- filter(.sfts_summ(sw_path, model_lv), metric == "sw")
   d_pl <- filter(.sfts_summ(pl_path, model_lv), metric == "pl")
-  g_sw <- .sfts_panel(d_sw, .sfts_cols["sw"], "Species-wide\ncorrelation (r)", FALSE, zero_line = FALSE) +
-    ggtitle(title) + theme(plot.title = element_text(size = 12))
-  g_pl <- .sfts_panel(d_pl, .sfts_cols["pl"], "Population-level\ncorrelation (r)", TRUE, zero_line = TRUE)
-  p <- g_sw / g_pl + plot_layout(heights = c(1.6, 1))
+  g_sw <- .sfts_panel(d_sw, "#DD9100", "Species-wide", FALSE, zero_line = FALSE) +   # BBS orange
+    ggtitle(title) + theme(plot.title = element_text(size = 10.5))
+  g_pl <- .sfts_panel(d_pl, "#254F9A", "Population-level", TRUE, zero_line = TRUE)   # BBS blue
+  p_main <- g_sw / g_pl + plot_layout(heights = c(1.6, 1))
+  ylab_col <- patchwork::wrap_elements(grid::textGrob("Correlation (r)", rot = 90,
+    gp = grid::gpar(fontsize = 13)))
+  p <- patchwork::wrap_plots(ylab_col, p_main, widths = c(1, 26))
   ggsave(sprintf("figures/%s.pdf", out_stem), p, width = fig_width, height = 190, units = "mm", dpi = 600)
   ggsave(sprintf("figures/%s.png", out_stem), p, width = fig_width, height = 190, units = "mm", dpi = 600)
   cat(sprintf("saved -> figures/%s.png\n", out_stem))
