@@ -1,12 +1,10 @@
-# RF site/route (CANONICAL). Site-level counterpart to fit_rf_bbs.R: population
-# unit = individual BBS route (site_id). Three models, three treatments (Temporal
-# 2001-2010 / Buffered 1991-2000 / Spatiotemporal 2001-2010 + K=8 block CV; test
-# 2011-2020), per-block decomposition (data/decomp_*.rds). Outputs
-# data/rf_bbs_site_results.rds, _buffer_results.rds, _spatialcv_k8_results.rds.
+# CANONICAL (see wrangle_decomp_blocks.R) -- RF site (route), new structure (per-block decomp, new windows),
+# all 3 treatments. Mirrors scripts/fit_rf_bbs_site.R + ..._site_spatialcv.R.
 library(tidyverse); library(ranger); library(foreach)
+SP <- "/private/tmp/claude-504/-Users-bsen3-Library-Mobile-Documents-com-apple-CloudDocs-Documents-SFTS/5062e77b-19cf-49df-8568-6314674f5c71/scratchpad"
 min_sites <- 15; min_test_years <- 5; min_sites_cv <- 25; min_pool_sites <- 15; K <- 8; n_trees <- 1000
 
-vars <- c("bio2","bio3","bio5","bio8","bio9","bio15","bio16","bio18")
+vars <- c("bio1","bio12")
 comp_terms <- as.vector(t(outer(vars, c("spatial","temporal","residual"), paste, sep="_")))
 keep <- c("abundance","elevs","party_hours", vars, comp_terms)
 
@@ -35,10 +33,12 @@ run <- function(decomp_path, train_yrs, blocking, out_path, tag) {
   agg <- function(df, sp, sk=NULL){ d <- filter(df, species_id==sp); if(!is.null(sk)) d <- filter(d, site_id %in% sk)
     d %>% group_by(site_id,year) %>% summarise(across(all_of(keep),mean),.groups="drop") }
   cat(sprintf("\n[RF site %s] %d species, blocking=%s\n", tag, length(species), blocking)); flush.console()
+
   if (!blocking) {
     res <- foreach(i=seq_along(species)) %do% {
       sp <- species[i]; tr <- agg(train3, sp)
       te <- agg(test, sp) %>% filter(site_id %in% unique(tr$site_id)) %>% group_by(site_id) %>% filter(n()>=min_test_years) %>% ungroup()
+      if (i %% 50 == 0) { cat(sprintf("  %d/%d\n", i, length(species))); flush.console() }
       if (n_distinct(tr$site_id) < min_sites || nrow(te) < min_test_years) return(NULL)
       y <- log(te$abundance)
       tryCatch({ p <- preds(tr, te)
@@ -51,6 +51,7 @@ run <- function(decomp_path, train_yrs, blocking, out_path, tag) {
     coord <- train3 %>% group_by(species_id, site_id) %>% summarise(lat=mean(lat), long=mean(long), .groups="drop")
     res <- foreach(i=seq_along(species)) %do% {
       sp <- species[i]; co <- filter(coord, species_id==sp)
+      if (i %% 25 == 0) { cat(sprintf("  %d/%d\n", i, length(species))); flush.console() }
       if (nrow(co) < min_sites_cv) return(NULL)
       xy <- cbind(x=co$long*cos(mean(co$lat)*pi/180), y=co$lat)
       km <- tryCatch({ set.seed(1); kmeans(xy, centers=K, nstart=10) }, error=function(e) NULL); if (is.null(km)) return(NULL)
@@ -68,8 +69,11 @@ run <- function(decomp_path, train_yrs, blocking, out_path, tag) {
     }
   }
   res <- bind_rows(res); saveRDS(res, out_path)
-  cat(sprintf("saved -> %s (%d species)\n", out_path, nrow(res))); flush.console()
+  q <- function(x) sprintf("%.2f", median(x, na.rm=T))
+  cat(sprintf("=== RF site [%s] (%d sp) sw sta/dyn/dec: %s/%s/%s\n", tag, nrow(res), q(res$static_sw), q(res$dynamic_sw), q(res$decomp_sw)))
+  cat(sprintf("saved -> %s\n", out_path)); flush.console()
 }
-run("data/decomp_temporal.rds", 2001:2010, FALSE, "data/rf_bbs_site_results.rds",             "Temporal")
-run("data/decomp_buffer.rds",   1991:2000, FALSE, "data/rf_bbs_site_buffer_results.rds",       "Buffered")
-run("data/decomp_temporal.rds", 2001:2010, TRUE,  "data/rf_bbs_site_spatialcv_k8_results.rds", "Spatiotemporal")
+
+run("data/decomp_temporal.rds", 2001:2010, FALSE, "data/rf_bbs_site_2var_results.rds", "Temporal")
+run("data/decomp_buffer.rds",   1991:2000, FALSE, "data/rf_bbs_site_2var_buffer_results.rds",   "Buffer")
+run("data/decomp_temporal.rds", 2001:2010, TRUE,  "data/rf_bbs_site_2var_spatialcv_k8_results.rds", "Spatiotemporal")

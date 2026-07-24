@@ -1,6 +1,7 @@
-# CANONICAL (see wrangle_decomp_blocks.R) -- GAM site, 8-var, per-block decomp, all 3 treatments, WITH CLAMPING
-# (predictors truncated to training [min,max] at predict time). Fits identical to
-# fit_gam_site_block.R; only the predict step changes. Output -> *_clamp_*.rds
+# CANONICAL (see wrangle_decomp_blocks.R) -- GAM site (route), new structure (per-block decomp, new windows),
+# all 3 treatments. Mirrors scripts/fit_gam_bbs_site.R + ..._site_spatialcv.R,
+# EXCEPT static uses the 8 vars' spatial components (like RF), not bio1+bio12.
+# 4 models: static(8) / dynamic(8) / decomposed(8x3) / svc(smooth s(long,lat)).
 library(tidyverse); library(mgcv); library(foreach)
 SP <- "/private/tmp/claude-504/-Users-bsen3-Library-Mobile-Documents-com-apple-CloudDocs-Documents-SFTS/5062e77b-19cf-49df-8568-6314674f5c71/scratchpad"
 min_sites <- 15; min_test_years <- 5; min_sites_cv <- 25; min_pool_sites <- 15; K <- 8
@@ -10,7 +11,6 @@ static_comp <- paste0(vars, "_spatial")
 comp_terms  <- as.vector(t(outer(vars, c("spatial","temporal","residual"), paste, sep="_")))
 resid_terms <- paste0(vars, "_residual")
 keep <- c("abundance","elevs","party_hours","lat","long", vars, comp_terms)
-ctrl_v <- c("elevs","party_hours")
 
 base <- readRDS("data/data_bbs_nozero.rds") %>%
   select(species_id, site_id, year, lat, long, abundance, elevs, party_hours)
@@ -26,9 +26,6 @@ plcor <- function(s,y,pred) tibble(s,y,pred) %>% group_by(s) %>% summarise(r=sup
 swcor <- function(s,y,pred){ q <- tibble(s,y,pred) %>% group_by(s) %>% summarise(o=mean(y),p=mean(pred),.groups="drop"); suppressWarnings(cor(q$o,q$p)) }
 gfit <- function(f,d) bam(f, data=d, discrete=TRUE, method="fREML")
 gp   <- function(m,newd) as.numeric(predict(m, newd))
-clamp <- function(newd, tr, cols) { for (v in cols) { r <- range(tr[[v]], na.rm=TRUE)
-  newd[[v]] <- pmin(pmax(newd[[v]], r[1]), r[2]) }; newd }
-
 mods <- function(tr, te) {
   nsite <- n_distinct(tr$site_id); k_sp <- min(60, nsite-1); k_by <- min(25, nsite-1)
   svc_int <- sprintf("s(long, lat, k=%d)", k_sp)
@@ -38,11 +35,7 @@ mods <- function(tr, te) {
   f_decomp  <- as.formula(paste("log(abundance) ~", rhs_decomp))
   f_svc     <- as.formula(paste("log(abundance) ~", rhs_svc_fix, "+", svc_int, "+", svc_by))
   te_static <- te; te_static[static_comp] <- te[vars]
-  te_static <- clamp(te_static, tr, c(ctrl_v, static_comp))
-  te_dyn    <- clamp(te, tr, c(ctrl_v, vars))
-  te_dec    <- clamp(te, tr, c(ctrl_v, comp_terms))
-  te_svc    <- clamp(te, tr, c(ctrl_v, paste0(vars,"_spatial"), paste0(vars,"_temporal"), "long","lat", resid_terms))
-  list(s=gp(gfit(f_static,tr),te_static), d=gp(gfit(f_dynamic,tr),te_dyn), c=gp(gfit(f_decomp,tr),te_dec), v=gp(gfit(f_svc,tr),te_svc))
+  list(s=gp(gfit(f_static,tr),te_static), d=gp(gfit(f_dynamic,tr),te), c=gp(gfit(f_decomp,tr),te), v=gp(gfit(f_svc,tr),te))
 }
 
 run <- function(decomp_path, train_yrs, blocking, out_path, tag) {
@@ -56,7 +49,7 @@ run <- function(decomp_path, train_yrs, blocking, out_path, tag) {
   species <- unique(train3$species_id)
   agg <- function(df, sp, sk=NULL){ d <- filter(df, species_id==sp); if(!is.null(sk)) d <- filter(d, site_id %in% sk)
     d %>% group_by(site_id,year) %>% summarise(across(all_of(keep),mean),.groups="drop") }
-  cat(sprintf("\n[GAM site CLAMP %s] %d species, blocking=%s\n", tag, length(species), blocking)); flush.console()
+  cat(sprintf("\n[GAM site %s] %d species, blocking=%s\n", tag, length(species), blocking)); flush.console()
 
   if (!blocking) {
     res <- foreach(i=seq_along(species)) %do% {
@@ -96,10 +89,11 @@ run <- function(decomp_path, train_yrs, blocking, out_path, tag) {
   }
   res <- bind_rows(res); saveRDS(res, out_path)
   q <- function(x) sprintf("%.2f", median(x, na.rm=T))
-  cat(sprintf("=== GAM site CLAMP [%s] (%d sp) sw sta/dyn/dec/svc: %s/%s/%s/%s\n", tag, nrow(res),
+  cat(sprintf("=== GAM site [%s] (%d sp) sw sta/dyn/dec/svc: %s/%s/%s/%s\n", tag, nrow(res),
     q(res$static_sw), q(res$dynamic_sw), q(res$decomp_sw), q(res$svc_sw)))
   cat(sprintf("saved -> %s\n", out_path)); flush.console()
 }
-run("data/decomp_temporal.rds", 2001:2010, FALSE, "data/gam_bbs_site_results.rds", "Temporal")
-run("data/decomp_buffer.rds",   1991:2000, FALSE, "data/gam_bbs_site_buffer_results.rds",   "Buffer")
-run("data/decomp_temporal.rds", 2001:2010, TRUE,  "data/gam_bbs_site_spatialcv_k8_results.rds", "Spatiotemporal")
+
+run("data/decomp_temporal.rds", 2001:2010, FALSE, "data/gam_bbs_site_noclamp_results.rds", "Temporal")
+run("data/decomp_buffer.rds",   1991:2000, FALSE, "data/gam_bbs_site_noclamp_buffer_results.rds",   "Buffer")
+run("data/decomp_temporal.rds", 2001:2010, TRUE,  "data/gam_bbs_site_noclamp_spatialcv_k8_results.rds", "Spatiotemporal")

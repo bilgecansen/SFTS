@@ -1,49 +1,40 @@
-# Combined BBS main-text figures -- the DEFAULT BBS figure structure. Each figure
-# is a 2x3 grid: species-wide over population-level (rows), Temporal / Buffered /
-# Spatiotemporal (columns), with the y-scale shared across treatments within each
-# row and the population-level row 1/3 the height of species-wide. One figure per
-# model family, titled by model, y-axes labelled as correlation (r).
+# Combined BBS figures (CANONICAL). Each figure is the 2x3 median-band grid:
+# species-wide over population-level (rows) x Temporal / Buffered / Spatiotemporal
+# (columns), from the per-block-decomposition results. See make_medband_grid in
+# plot_helpers.R. Writes to figures/.
 #
-# For each family two versions are written:
-#   <stem>        - pooled across all species
-#   <stem>_mig2   - split by migratory status (Resident vs Migrant, coloured;
-#                   AVONET Migration collapsed to sedentary=Resident vs 2/3=Migrant,
-#                   see data/species_migration.rds). Grouped bands are dodged side
-#                   by side with no median-connecting line.
-#
-#   gam_bbs_combined       - GAM,  strata (4 models incl. SVC)
-#   rf_bbs_combined        - RF,   strata (3 models)
-#   rf_bbs_site_combined   - RF,   route/site (3 models)
-#   gam_bbs_site_combined  - GAM,  route/site (4 models incl. SVC)
+# MAIN:  RF strata, RF site, GAM strata (clamped), GAM site (clamped).
+# SI:    GAM strata/site un-clamped ; RF & GAM at 2 vars (bio1+bio12), strata/site.
+# (GAM main analysis clamps predictors to the training range at predict time; the
+#  un-clamped versions are the SI extrapolation comparison.)
 
 source("scripts/plot_helpers.R")
-
 treatments <- c("Temporal", "Buffered", "Spatiotemporal")
+rf_lv  <- c("Static", "Dynamic", "Decomposed")
+gam_lv <- c("Static", "Dynamic", "Decomposed", "SVC")
 
+# stem -> (result triple prefix, model levels, title)
 specs <- list(
-  list(stem = "gam_bbs_combined", title = "GAM (strata)",
-       paths = c("data/gam_bbs_results.rds", "data/gam_bbs_buffer_results.rds",
-                 "data/gam_bbs_spatialcv_k8_results.rds"),
-       models = c("Static", "Dynamic", "Decomposed", "SVC")),
-  list(stem = "rf_bbs_combined", title = "Random Forest (strata)",
-       paths = c("data/rf_bbs_results.rds", "data/rf_bbs_buffer_results.rds",
-                 "data/rf_bbs_spatialcv_k8_results.rds"),
-       models = c("Static", "Dynamic", "Decomposed")),
-  list(stem = "rf_bbs_site_combined", title = "Random Forest (route)",
-       paths = c("data/rf_bbs_site_results.rds", "data/rf_bbs_site_buffer_results.rds",
-                 "data/rf_bbs_site_spatialcv_k8_results.rds"),
-       models = c("Static", "Dynamic", "Decomposed")),
-  list(stem = "gam_bbs_site_combined", title = "GAM (route)",
-       paths = c("data/gam_bbs_site_results.rds", "data/gam_bbs_site_buffer_results.rds",
-                 "data/gam_bbs_site_spatialcv_k8_results.rds"),
-       models = c("Static", "Dynamic", "Decomposed", "SVC"))
+  # --- main ---
+  list("rf_bbs_combined",              "rf_bbs",              rf_lv,  "RF (strata)"),
+  list("rf_bbs_site_combined",         "rf_bbs_site",         rf_lv,  "RF (route)"),
+  list("gam_bbs_combined",             "gam_bbs",             gam_lv, "GAM (strata)"),
+  list("gam_bbs_site_combined",        "gam_bbs_site",        gam_lv, "GAM (route)"),
+  # --- SI: un-clamped GAM ---
+  list("gam_bbs_noclamp_combined",     "gam_bbs_noclamp",     gam_lv, "GAM (strata) — un-clamped"),
+  list("gam_bbs_site_noclamp_combined","gam_bbs_site_noclamp",gam_lv, "GAM (route) — un-clamped"),
+  # --- SI: 2 variables (bio1 + bio12) ---
+  list("rf_bbs_2var_combined",         "rf_bbs_2var",         rf_lv,  "RF (strata) — 2 vars"),
+  list("rf_bbs_site_2var_combined",    "rf_bbs_site_2var",    rf_lv,  "RF (route) — 2 vars"),
+  list("gam_bbs_2var_combined",        "gam_bbs_2var",        gam_lv, "GAM (strata) — 2 vars"),
+  list("gam_bbs_site_2var_combined",   "gam_bbs_site_2var",   gam_lv, "GAM (route) — 2 vars")
 )
 
 for (s in specs) {
-  if (!all(file.exists(s$paths))) {
-    cat(sprintf("skip %s (missing result files)\n", s$stem)); next
-  }
-  make_medband_grid(s$paths, treatments, s$stem, s$models, title = s$title)
-  make_medband_grid(s$paths, treatments, paste0(s$stem, "_mig2"), s$models,
-                    title = s$title, split = "mig2")
+  stem <- s[[1]]; pre <- s[[2]]; lv <- s[[3]]; title <- s[[4]]
+  paths <- c(sprintf("data/%s_results.rds", pre),
+             sprintf("data/%s_buffer_results.rds", pre),
+             sprintf("data/%s_spatialcv_k8_results.rds", pre))
+  if (!all(file.exists(paths))) { cat(sprintf("skip %s (missing results)\n", stem)); next }
+  make_medband_grid(paths, treatments, stem, lv, title = title)
 }

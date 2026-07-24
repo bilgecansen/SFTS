@@ -1,18 +1,16 @@
-# CANONICAL (see wrangle_decomp_blocks.R) -- GAM strata, 8-var, per-block decomp, all 3 treatments, WITH
-# CLAMPING: at predict time every predictor in newdata is truncated to its
-# training [min,max] before predict(), so the smooths never extrapolate beyond
-# the fitted envelope (mimicking RF's bounded predictions). Fits are identical to
-# fit_gam_strata_block.R; only the predict step changes. Output -> *_clamp_*.rds
+# CANONICAL (see wrangle_decomp_blocks.R) -- GAM strata, new structure (per-block decomp, new windows), all 3
+# treatments. Mirrors scripts/fit_gam_bbs.R + fit_gam_bbs_spatialcv.R, EXCEPT
+# static now uses the 8 vars' spatial components (like RF), not bio1+bio12.
+# 4 models: static(8 spatial) / dynamic(8) / decomposed(8x3) / svc(smooth).
 library(tidyverse); library(mgcv); library(foreach)
 SP <- "/private/tmp/claude-504/-Users-bsen3-Library-Mobile-Documents-com-apple-CloudDocs-Documents-SFTS/5062e77b-19cf-49df-8568-6314674f5c71/scratchpad"
 min_strata <- 15; min_test_years <- 5; min_strata_cv <- 25; min_pool_strata <- 15; K <- 8
 
 vars <- c("bio2","bio3","bio5","bio8","bio9","bio15","bio16","bio18")
-static_comp <- paste0(vars, "_spatial")
+static_comp <- paste0(vars, "_spatial")            # 8-var static
 comp_terms  <- as.vector(t(outer(vars, c("spatial","temporal","residual"), paste, sep="_")))
 resid_terms <- paste0(vars, "_residual")
 keep <- c("abundance","elevs","party_hours","lat","long", vars, comp_terms)
-ctrl_v <- c("elevs","party_hours")
 
 base <- readRDS("data/data_bbs_nozero.rds") %>%
   select(species_id, site_id, year, strata, lat, long, abundance, elevs, party_hours)
@@ -28,27 +26,20 @@ plcor <- function(s,y,pred) tibble(s,y,pred) %>% group_by(s) %>% summarise(r=sup
 swcor <- function(s,y,pred){ q <- tibble(s,y,pred) %>% group_by(s) %>% summarise(o=mean(y),p=mean(pred),.groups="drop"); suppressWarnings(cor(q$o,q$p)) }
 gfit <- function(f,d) bam(f, data=d, discrete=TRUE, method="fREML")
 gp   <- function(m,newd) as.numeric(predict(m, newd))
-
-# clamp every column in `cols` of newd to the training [min,max] from tr
-clamp <- function(newd, tr, cols) { for (v in cols) { r <- range(tr[[v]], na.rm=TRUE)
-  newd[[v]] <- pmin(pmax(newd[[v]], r[1]), r[2]) }; newd }
-
-svc_forms <- function(nst) { k_sp <- min(30, nst-1); k_by <- min(10, nst-1)
+svc_forms <- function(nst) {
+  k_sp <- min(30, nst-1); k_by <- min(10, nst-1)
   list(int=sprintf("s(long, lat, k=%d)", k_sp),
-       by =paste(sprintf("s(long, lat, by=%s, k=%d)", resid_terms, k_by), collapse=" + ")) }
+       by =paste(sprintf("s(long, lat, by=%s, k=%d)", resid_terms, k_by), collapse=" + "))
+}
 mods <- function(tr, te) {
   s <- svc_forms(n_distinct(tr$strata))
   f_static  <- as.formula(paste("log(abundance) ~", rhs_static))
   f_dynamic <- as.formula(paste("log(abundance) ~", rhs_dynamic))
   f_decomp  <- as.formula(paste("log(abundance) ~", rhs_decomp))
   f_svc     <- as.formula(paste("log(abundance) ~", rhs_svc_fix, "+", s$int, "+", s$by))
-  te_static <- te; te_static[static_comp] <- te[vars]                      # raw -> _spatial slots
-  te_static <- clamp(te_static, tr, c(ctrl_v, static_comp))               # clamp raw to training spatial range
-  te_dyn    <- clamp(te, tr, c(ctrl_v, vars))
-  te_dec    <- clamp(te, tr, c(ctrl_v, comp_terms))
-  te_svc    <- clamp(te, tr, c(ctrl_v, paste0(vars,"_spatial"), paste0(vars,"_temporal"), "long","lat", resid_terms))
-  list(p_static=gp(gfit(f_static,tr),te_static), p_dynamic=gp(gfit(f_dynamic,tr),te_dyn),
-       p_decomp=gp(gfit(f_decomp,tr),te_dec),    p_svc=gp(gfit(f_svc,tr),te_svc))
+  te_static <- te; te_static[static_comp] <- te[vars]
+  list(p_static=gp(gfit(f_static,tr),te_static), p_dynamic=gp(gfit(f_dynamic,tr),te),
+       p_decomp=gp(gfit(f_decomp,tr),te),        p_svc=gp(gfit(f_svc,tr),te))
 }
 
 run <- function(decomp_path, train_yrs, blocking, out_path, tag) {
@@ -62,7 +53,7 @@ run <- function(decomp_path, train_yrs, blocking, out_path, tag) {
   species <- unique(train3$species_id)
   agg <- function(df, sp, sk=NULL){ d <- filter(df, species_id==sp); if(!is.null(sk)) d <- filter(d, strata %in% sk)
     d %>% group_by(strata,year) %>% summarise(across(all_of(keep),mean),.groups="drop") }
-  cat(sprintf("\n[GAM strata CLAMP %s] %d species, blocking=%s\n", tag, length(species), blocking)); flush.console()
+  cat(sprintf("\n[GAM strata %s] %d species, blocking=%s\n", tag, length(species), blocking)); flush.console()
 
   if (!blocking) {
     res <- foreach(i=seq_along(species)) %do% {
@@ -107,10 +98,11 @@ run <- function(decomp_path, train_yrs, blocking, out_path, tag) {
   }
   res <- bind_rows(res); saveRDS(res, out_path)
   q <- function(x) sprintf("%.2f", median(x, na.rm=T))
-  cat(sprintf("=== GAM strata CLAMP [%s] (%d sp) sw sta/dyn/dec/svc: %s/%s/%s/%s\n", tag, nrow(res),
+  cat(sprintf("=== GAM strata [%s] (%d sp) sw sta/dyn/dec/svc: %s/%s/%s/%s\n", tag, nrow(res),
     q(res$static_sw), q(res$dynamic_sw), q(res$decomp_sw), q(res$svc_sw)))
   cat(sprintf("saved -> %s\n", out_path)); flush.console()
 }
-run("data/decomp_temporal.rds", 2001:2010, FALSE, "data/gam_bbs_results.rds", "Temporal")
-run("data/decomp_buffer.rds",   1991:2000, FALSE, "data/gam_bbs_buffer_results.rds",   "Buffer")
-run("data/decomp_temporal.rds", 2001:2010, TRUE,  "data/gam_bbs_spatialcv_k8_results.rds", "Spatiotemporal")
+
+run("data/decomp_temporal.rds", 2001:2010, FALSE, "data/gam_bbs_noclamp_results.rds", "Temporal")
+run("data/decomp_buffer.rds",   1991:2000, FALSE, "data/gam_bbs_noclamp_buffer_results.rds",   "Buffer")
+run("data/decomp_temporal.rds", 2001:2010, TRUE,  "data/gam_bbs_noclamp_spatialcv_k8_results.rds", "Spatiotemporal")

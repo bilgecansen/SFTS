@@ -1,20 +1,11 @@
-# RF strata (CANONICAL). Population unit = state x BCR stratum. Three model types
-# (static / dynamic / decomposed), three treatments in one script:
-#   Temporal       : train 2001-2010,           test 2011-2020
-#   Buffered       : train 1991-2000 (gap),      test 2011-2020
-#   Spatiotemporal : train 2001-2010 + K=8 spatial block CV, test 2011-2020
-# Climate uses the per-block decomposition (data/decomp_*.rds, from
-# wrangle_decomp_blocks.R): train and test decomposed separately within their own
-# years. Non-climate columns come from data/data_bbs_nozero.rds. static uses the 8
-# vars' spatial (climatological) components projected onto the raw test climate;
-# dynamic uses raw; decomposed uses spatial+temporal+residual. log(abundance),
-# controls elevs + party_hours. Response metrics: species-wide and population-level
-# Pearson r. Outputs data/rf_bbs_results.rds (Temporal), _buffer_results.rds,
-# _spatialcv_k8_results.rds.
+# CANONICAL (see wrangle_decomp_blocks.R) -- RF strata, per-block decomp, all 3 treatments, 2 VARIABLES only
+# (bio1 = annual mean temp, bio12 = annual precip). Same structure as the 8-var
+# block run. Output -> *_2var_*.rds.
 library(tidyverse); library(ranger); library(foreach)
+SP <- "/private/tmp/claude-504/-Users-bsen3-Library-Mobile-Documents-com-apple-CloudDocs-Documents-SFTS/5062e77b-19cf-49df-8568-6314674f5c71/scratchpad"
 min_strata <- 15; min_test_years <- 5; min_strata_cv <- 25; min_pool_strata <- 15; K <- 8; n_trees <- 1000
 
-vars <- c("bio2","bio3","bio5","bio8","bio9","bio15","bio16","bio18")
+vars <- c("bio1","bio12")
 comp_terms <- as.vector(t(outer(vars, c("spatial","temporal","residual"), paste, sep="_")))
 keep <- c("abundance","elevs","party_hours", vars, comp_terms)
 
@@ -42,7 +33,7 @@ run <- function(decomp_path, train_yrs, blocking, out_path, tag) {
   species <- unique(train3$species_id)
   agg <- function(df, sp, sk=NULL){ d <- filter(df, species_id==sp); if(!is.null(sk)) d <- filter(d, strata %in% sk)
     d %>% group_by(strata,year) %>% summarise(across(all_of(keep),mean),.groups="drop") }
-  cat(sprintf("\n[RF strata %s] %d species, blocking=%s\n", tag, length(species), blocking)); flush.console()
+  cat(sprintf("\n[RF strata 2var %s] %d species, blocking=%s\n", tag, length(species), blocking)); flush.console()
   if (!blocking) {
     res <- foreach(i=seq_along(species)) %do% {
       sp <- species[i]; tr <- agg(train3, sp)
@@ -76,8 +67,10 @@ run <- function(decomp_path, train_yrs, blocking, out_path, tag) {
     }
   }
   res <- bind_rows(res); saveRDS(res, out_path)
-  cat(sprintf("saved -> %s (%d species)\n", out_path, nrow(res))); flush.console()
+  q <- function(x) sprintf("%.2f", median(x, na.rm=T))
+  cat(sprintf("=== RF strata 2var [%s] (%d sp) sw %s/%s/%s\n", tag, nrow(res), q(res$static_sw), q(res$dynamic_sw), q(res$decomp_sw)))
+  cat(sprintf("saved -> %s\n", out_path)); flush.console()
 }
-run("data/decomp_temporal.rds", 2001:2010, FALSE, "data/rf_bbs_results.rds",              "Temporal")
-run("data/decomp_buffer.rds",   1991:2000, FALSE, "data/rf_bbs_buffer_results.rds",        "Buffered")
-run("data/decomp_temporal.rds", 2001:2010, TRUE,  "data/rf_bbs_spatialcv_k8_results.rds",  "Spatiotemporal")
+run("data/decomp_temporal.rds", 2001:2010, FALSE, "data/rf_bbs_2var_results.rds", "Temporal")
+run("data/decomp_buffer.rds",   1991:2000, FALSE, "data/rf_bbs_2var_buffer_results.rds",   "Buffer")
+run("data/decomp_temporal.rds", 2001:2010, TRUE,  "data/rf_bbs_2var_spatialcv_k8_results.rds", "Spatiotemporal")

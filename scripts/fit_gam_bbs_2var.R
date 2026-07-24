@@ -7,7 +7,7 @@ library(tidyverse); library(mgcv); library(foreach)
 SP <- "/private/tmp/claude-504/-Users-bsen3-Library-Mobile-Documents-com-apple-CloudDocs-Documents-SFTS/5062e77b-19cf-49df-8568-6314674f5c71/scratchpad"
 min_strata <- 15; min_test_years <- 5; min_strata_cv <- 25; min_pool_strata <- 15; K <- 8
 
-vars <- c("bio2","bio3","bio5","bio8","bio9","bio15","bio16","bio18")
+vars <- c("bio1","bio12")
 static_comp <- paste0(vars, "_spatial")
 comp_terms  <- as.vector(t(outer(vars, c("spatial","temporal","residual"), paste, sep="_")))
 resid_terms <- paste0(vars, "_residual")
@@ -111,6 +111,6 @@ run <- function(decomp_path, train_yrs, blocking, out_path, tag) {
     q(res$static_sw), q(res$dynamic_sw), q(res$decomp_sw), q(res$svc_sw)))
   cat(sprintf("saved -> %s\n", out_path)); flush.console()
 }
-run("data/decomp_temporal.rds", 2001:2010, FALSE, "data/gam_bbs_results.rds", "Temporal")
-run("data/decomp_buffer.rds",   1991:2000, FALSE, "data/gam_bbs_buffer_results.rds",   "Buffer")
-run("data/decomp_temporal.rds", 2001:2010, TRUE,  "data/gam_bbs_spatialcv_k8_results.rds", "Spatiotemporal")
+run("data/decomp_temporal.rds", 2001:2010, FALSE, "data/gam_bbs_2var_results.rds", "Temporal")
+run("data/decomp_buffer.rds",   1991:2000, FALSE, "data/gam_bbs_2var_buffer_results.rds",   "Buffer")
+run("data/decomp_temporal.rds", 2001:2010, TRUE,  "data/gam_bbs_2var_spatialcv_k8_results.rds", "Spatiotemporal")
