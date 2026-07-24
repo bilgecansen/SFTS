@@ -96,7 +96,7 @@ make_medband <- function(res_path, out_stem, title, model_lv, fig_width = 175) {
 #                group; there is no median-connecting line (the bands stand alone).
 make_medband_grid <- function(paths, treatments, out_stem, model_lv,
                               fig_width = 180, fig_height = 120, title = NULL,
-                              heights = c(3, 1), labels = FALSE, split = NULL) {
+                              heights = c(3, 1), labels = TRUE, split = NULL) {
   d <- purrr::imap_dfr(paths, function(p, i)
     mutate(.sfts_summ(p, model_lv, split = split), treatment = treatments[i])) %>%
     mutate(treatment = factor(treatment, levels = treatments))
@@ -125,18 +125,24 @@ make_medband_grid <- function(paths, treatments, out_stem, model_lv,
     g <- g +
       facet_wrap(~ treatment, nrow = 1) +
       scale_y_continuous(breaks = scales::pretty_breaks(n = nbreaks),
-        expand = expansion(mult = c(0.10, 0.12))) +
+        expand = expansion(mult = if (is_top) c(0.08, 0.20) else c(0.14, 0.14))) +
       coord_cartesian(clip = "off") +
       labs(x = NULL, y = ylab) +
       theme_bw(base_size = 11) +
       theme(panel.grid.minor = element_blank(), panel.grid.major.x = element_blank(),
         panel.border = element_rect(colour = "grey80", fill = NA, linewidth = 0.5),
         panel.spacing.x = unit(7, "pt"),
-        axis.title.y = element_text(size = 11, margin = margin(r = 6)),
+        axis.title.y = element_text(size = 9, margin = margin(r = 2)),
         axis.text.y = element_text(size = 9.5))
-    if (labels && !grouped)
-      g <- g + geom_label(aes(label = sprintf("%.2f", med)), colour = colr, fill = "white",
-        label.size = 0, label.padding = unit(0.08, "lines"), nudge_x = 0.16, size = 2.6)
+    if (labels && !grouped) {
+      if (is_top)  # species-wide: float the number above the 95% cap -> no overlap
+        g <- g + geom_label(aes(y = q95, label = sprintf("%.2f", med)), colour = colr,
+          fill = "white", label.size = 0, label.padding = unit(0.05, "lines"),
+          vjust = -0.35, size = 2.3)
+      else         # population-level: nudge beside the point (space is tight, overlap ok)
+        g <- g + geom_label(aes(label = sprintf("%.2f", med)), colour = colr, fill = "white",
+          label.size = 0, label.padding = unit(0.05, "lines"), nudge_x = 0.24, size = 2.2)
+    }
     if (is_top)
       g + theme(strip.background = element_rect(fill = "grey95", colour = "grey80", linewidth = 0.5),
         strip.text = element_text(size = 10.5),
@@ -147,14 +153,19 @@ make_medband_grid <- function(paths, treatments, out_stem, model_lv,
   }
 
   top <- row_panel(filter(d, metric == "sw"), unname(.sfts_cols["sw"]),
-    "Species-wide\ncorrelation (r)", TRUE, FALSE, nbreaks = 5)
+    "Species-wide", TRUE, FALSE, nbreaks = 5)
   bot <- row_panel(filter(d, metric == "pl"), unname(.sfts_cols["pl"]),
-    "Population-level\ncorrelation (r)", FALSE, TRUE, nbreaks = 3)
+    "Population-level", FALSE, TRUE, nbreaks = 3)
   if (!is.null(title))
     top <- top + ggtitle(title) + theme(plot.title = element_text(size = 12))
 
-  p <- top / bot + plot_layout(heights = heights, guides = "collect")
-  if (grouped) p <- p & theme(legend.position = "bottom", legend.margin = margin(t = 0, b = 0))
+  p_main <- top / bot + plot_layout(heights = heights, guides = "collect")
+  if (grouped) p_main <- p_main & theme(legend.position = "bottom", legend.margin = margin(t = 0, b = 0))
+  # outer, larger y-axis title spanning both rows ("Correlation (r)"), set a bit
+  # further out than the small per-panel subtitles ("Species-wide"/"Population-level").
+  ylab_col <- patchwork::wrap_elements(grid::textGrob("Correlation (r)", rot = 90,
+    gp = grid::gpar(fontsize = 13)))
+  p <- patchwork::wrap_plots(ylab_col, p_main, widths = c(1, 26))
   ggsave(sprintf("figures/%s.pdf", out_stem), p, width = fig_width, height = fig_height, units = "mm", dpi = 600)
   ggsave(sprintf("figures/%s.png", out_stem), p, width = fig_width, height = fig_height, units = "mm", dpi = 600)
   cat(sprintf("saved -> figures/%s.png\n", out_stem))
@@ -176,4 +187,81 @@ make_medband_split <- function(sw_path, pl_path, out_stem, title, model_lv, fig_
   ggsave(sprintf("figures/%s.pdf", out_stem), p, width = fig_width, height = 190, units = "mm", dpi = 600)
   ggsave(sprintf("figures/%s.png", out_stem), p, width = fig_width, height = 190, units = "mm", dpi = 600)
   cat(sprintf("saved -> figures/%s.png\n", out_stem))
+}
+
+
+# Two-axis MAIN figure (CANONICAL). One figure per metric x scale. The two axes of
+# changing performance are made explicit:
+#   x  = model type (Static -> SVC)                = relaxing the STE assumption ->
+#   rows (facet) = treatment (Temporal/Buffered/Spatiotemporal) = harder to transfer (down)
+# GAM vs RF are dodged and coloured within each model type (GAM centres at SVC,
+# which RF lacks). Median point + IQR (thick) + 5-95% (thin), NO connecting line;
+# the median value sits beside each point (GAM to the left, RF to the right). y is
+# free-scaled per row, gridlines every 0.2 (species-wide) / 0.1 (population-level).
+# Two thick labelled arrows frame the axes. Reads data/{rf,gam}_bbs[_site]_*.rds.
+#   metric : "sw" (species-wide) or "pl" (population-level)
+#   scale  : "strata" or "site"
+#   out    : figures/<out>.{png,pdf}
+make_2axis <- function(metric, scale, out, width = 165, height = 178) {
+  model_lv <- c("Static","Dynamic","Decomposed","SVC")
+  trt_lv   <- c("Temporal","Buffered","Spatiotemporal")
+  fam_cols <- c(GAM = "#DD9100", RF = "#254F9A")
+  pre  <- if (scale == "strata") c(rf="rf_bbs", gam="gam_bbs") else c(rf="rf_bbs_site", gam="gam_bbs_site")
+  trt  <- c(Temporal="results", Buffered="buffer_results", Spatiotemporal="spatialcv_k8_results")
+  suff <- paste0("_", metric)
+  mlab <- if (metric == "sw") "Species-wide" else "Population-level"
+  slab <- if (scale == "strata") "Strata" else "Site"
+  ystep <- if (metric == "sw") 0.2 else 0.1
+
+  summ <- function(path) readRDS(path) %>% select(ends_with(suff)) %>%
+    pivot_longer(everything(), names_to = "key", values_to = "r") %>%
+    mutate(model = recode(str_remove(key, paste0(suff, "$")),
+                          static = "Static", dynamic = "Dynamic", decomp = "Decomposed", svc = "SVC")) %>%
+    filter(model %in% model_lv) %>% group_by(model) %>%
+    summarise(med = median(r, na.rm = TRUE), q05 = quantile(r, .05, na.rm = TRUE),
+              q25 = quantile(r, .25, na.rm = TRUE), q75 = quantile(r, .75, na.rm = TRUE),
+              q95 = quantile(r, .95, na.rm = TRUE), .groups = "drop")
+  fam_paths <- list(
+    RF  = setNames(sprintf("data/%s_%s.rds", pre["rf"],  trt), names(trt)),
+    GAM = setNames(sprintf("data/%s_%s.rds", pre["gam"], trt), names(trt)))
+  d <- purrr::imap_dfr(fam_paths, function(paths, fam)
+         purrr::imap_dfr(paths, function(p, tr) mutate(summ(p), family = fam, treatment = tr))) %>%
+    mutate(family = factor(family, levels = c("GAM","RF")), model = factor(model, levels = model_lv),
+           treatment = factor(treatment, levels = trt_lv))   # no complete() -> GAM centres at SVC
+
+  pd <- position_dodge(width = 0.55)
+  main <- ggplot(d, aes(model, med, colour = family, group = family)) +
+    geom_hline(yintercept = 0, linetype = 2, linewidth = 0.3, colour = "grey70") +
+    geom_linerange(aes(ymin = q05, ymax = q95), linewidth = 0.6, alpha = 0.5, position = pd, na.rm = TRUE) +
+    geom_linerange(aes(ymin = q25, ymax = q75), linewidth = 1.9, position = pd, na.rm = TRUE) +
+    geom_point(size = 2.1, position = pd, na.rm = TRUE) +
+    geom_text(aes(y = med, label = sprintf("%.2f", med), hjust = ifelse(family == "GAM", 1.45, -0.45)),
+              position = pd, vjust = 0.4, size = 2.0, show.legend = FALSE, na.rm = TRUE) +
+    facet_grid(treatment ~ ., scales = "free_y") +
+    scale_colour_manual(values = fam_cols, name = NULL) +
+    coord_cartesian(clip = "off") +
+    scale_y_continuous(breaks = seq(-1, 1, ystep), expand = expansion(mult = c(0.05, 0.07))) +
+    labs(x = NULL, y = paste0(mlab, " correlation (r)")) + theme_bw(base_size = 11) +
+    theme(panel.grid.minor = element_blank(), panel.grid.major.x = element_blank(),
+          panel.border = element_rect(colour = "grey80", fill = NA, linewidth = 0.5),
+          strip.background = element_rect(fill = "grey95", colour = "grey80", linewidth = 0.5),
+          strip.text.y = element_text(size = 10), legend.position = "bottom",
+          axis.text.x = element_text(size = 10.5), axis.title.y = element_text(size = 10.5, margin = margin(r = 3)))
+  top_arrow <- ggplot() +
+    geom_segment(aes(x = 0.08, xend = 0.97, y = 0.32, yend = 0.32),
+      arrow = arrow(length = unit(3.2, "mm"), type = "closed"), linewidth = 1.8, colour = "grey20") +
+    annotate("text", x = 0.52, y = 0.82, label = "STE assumption relaxed", size = 3.9, fontface = 2) +
+    xlim(0, 1) + ylim(0, 1) + theme_void()
+  left_arrow <- ggplot() +
+    geom_segment(aes(x = 0.72, xend = 0.72, y = 0.96, yend = 0.04),
+      arrow = arrow(length = unit(3.2, "mm"), type = "closed"), linewidth = 1.8, colour = "grey20") +
+    annotate("text", x = 0.32, y = 0.5, label = "Harder to transfer", angle = 90, size = 3.9, fontface = 2) +
+    xlim(0, 1) + ylim(0, 1) + theme_void()
+  p <- wrap_plots(A = top_arrow, B = left_arrow, C = main, design = "#A\nBC",
+                  widths = c(0.07, 1), heights = c(0.08, 1)) +
+    plot_annotation(title = paste0(mlab, " — ", slab),
+                    theme = theme(plot.title = element_text(size = 13, face = "bold", hjust = 0.5)))
+  ggsave(sprintf("figures/%s.png", out), p, width = width, height = height, units = "mm", dpi = 300)
+  ggsave(sprintf("figures/%s.pdf", out), p, width = width, height = height, units = "mm", dpi = 300)
+  cat(sprintf("saved -> figures/%s.png\n", out))
 }

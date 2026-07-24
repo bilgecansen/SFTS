@@ -1,12 +1,10 @@
-# Combined BBS figures (CANONICAL). Each figure is the 2x3 median-band grid:
-# species-wide over population-level (rows) x Temporal / Buffered / Spatiotemporal
-# (columns), from the per-block-decomposition results. See make_medband_grid in
-# plot_helpers.R. Writes to figures/.
+# SUPPLEMENTARY BBS grid figures (2x3 median-band grid: species-wide over
+# population-level rows x Temporal/Buffered/Spatiotemporal columns, one figure per
+# model family). See make_medband_grid in plot_helpers.R. Writes to figures/.
 #
-# MAIN:  RF strata, RF site, GAM strata (clamped), GAM site (clamped).
-# SI:    GAM strata/site un-clamped ; RF & GAM at 2 vars (bio1+bio12), strata/site.
-# (GAM main analysis clamps predictors to the training range at predict time; the
-#  un-clamped versions are the SI extrapolation comparison.)
+# The MAIN paper figures are now the "two-axis" figures in plots_2axis.R (GAM+RF
+# combined). This script keeps the per-family grids for the SI comparisons only:
+# un-clamped GAM (vs the clamped main) and the 2-variable (bio1+bio12) robustness.
 
 source("scripts/plot_helpers.R")
 treatments <- c("Temporal", "Buffered", "Spatiotemporal")
@@ -15,12 +13,7 @@ gam_lv <- c("Static", "Dynamic", "Decomposed", "SVC")
 
 # stem -> (result triple prefix, model levels, title)
 specs <- list(
-  # --- main ---
-  list("rf_bbs_combined",              "rf_bbs",              rf_lv,  "RF (strata)"),
-  list("rf_bbs_site_combined",         "rf_bbs_site",         rf_lv,  "RF (route)"),
-  list("gam_bbs_combined",             "gam_bbs",             gam_lv, "GAM (strata)"),
-  list("gam_bbs_site_combined",        "gam_bbs_site",        gam_lv, "GAM (route)"),
-  # --- SI: un-clamped GAM ---
+  # --- SI: un-clamped GAM (vs the clamped main analysis) ---
   list("gam_bbs_noclamp_combined",     "gam_bbs_noclamp",     gam_lv, "GAM (strata) — un-clamped"),
   list("gam_bbs_site_noclamp_combined","gam_bbs_site_noclamp",gam_lv, "GAM (route) — un-clamped"),
   # --- SI: 2 variables (bio1 + bio12) ---
