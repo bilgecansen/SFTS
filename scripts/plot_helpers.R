@@ -52,16 +52,11 @@ library(patchwork)
     geom_errorbar(aes(ymin = q05, ymax = q95), width = 0.12, linewidth = 0.8, alpha = 0.45, colour = colr) +
     geom_linerange(aes(ymin = q25, ymax = q75), linewidth = 1.9, colour = colr) +
     geom_line(linewidth = 0.9, colour = colr) +
-    geom_point(size = 3, colour = colr)
-  if (show_x)   # bottom / population-level: label nudged beside the point (tight, overlap ok)
-    g <- g + geom_label(aes(label = sprintf("%.2f", med)), colour = colr, fill = "white",
-      label.size = 0, label.padding = unit(0.08, "lines"), nudge_x = 0.2, size = 3.0)
-  else          # top / species-wide: label above the 95% cap (no overlap with band/line/point)
-    g <- g + geom_label(aes(y = q95, label = sprintf("%.2f", med)), colour = colr, fill = "white",
-      label.size = 0, label.padding = unit(0.08, "lines"), vjust = -0.35, size = 3.0)
-  g <- g +
-    scale_y_continuous(breaks = scales::pretty_breaks(n = 5),
-      expand = expansion(mult = if (show_x) c(0.08, 0.12) else c(0.06, 0.20))) +
+    geom_point(size = 3, colour = colr) +
+    # median number beside its point (to the right, just below the line)
+    geom_label(aes(label = sprintf("%.2f", med)), colour = colr, fill = "white",
+      label.size = 0, label.padding = unit(0.08, "lines"), nudge_x = 0.14, vjust = 1.35, size = 3.0) +
+    scale_y_continuous(breaks = scales::pretty_breaks(n = 5), expand = expansion(mult = c(0.08, 0.10))) +
     coord_cartesian(clip = "off") +
     labs(y = ylab) +
     theme_bw(base_size = 12) +
