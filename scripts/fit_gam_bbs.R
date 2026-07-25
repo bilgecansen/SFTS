@@ -33,6 +33,25 @@ gp   <- function(m,newd) as.numeric(predict(m, newd))
 clamp <- function(newd, tr, cols) { for (v in cols) { r <- range(tr[[v]], na.rm=TRUE)
   newd[[v]] <- pmin(pmax(newd[[v]], r[1]), r[2]) }; newd }
 
+# SVC terms, following Thorson et al. 2023 (Ecography, doi:10.1111/ecog.06510),
+# "Overview of spatially varying coefficients": their recommended template is
+# y ~ s(lat,lon) + s(lat,lon, by=x), letting both the intercept and the slopes vary
+# smoothly over space.
+#   int = s(long,lat)            -> the spatially varying INTERCEPT a_s. This is the
+#         term that "addresses spatial autocorrelation" in the paper's sense: a
+#         low-rank/thin-plate-spline stand-in for a Gaussian random field over space,
+#         which soaks up spatial structure in the mean (SAC in the trend). So the SVC
+#         already accounts for spatial autocorrelation; no separate residual
+#         correlation structure (corExp/corGaus) is needed for a Gaussian response --
+#         a spatial field in the linear predictor and correlated residual errors are
+#         two encodings of the same dependence. (mgcv uses a thin-plate GP here, vs.
+#         the paper's Matern GRF with an explicit range; same role, use bs="gp" for a
+#         range parameter if a reviewer wants the geostatistical version.)
+#   by  = s(long,lat, by=resid)  -> the spatially varying SLOPES b_s (the SVC proper /
+#         nonstationarity), one field per residual driver.
+# Caveat: both fields are estimated in TRAINING space, so they extrapolate to unseen
+# coordinates under spatial (K-block) CV and are a single fixed-in-time surface under
+# temporal splits -- which is why SVC collapses to ~static at the population level.
 svc_forms <- function(nst) { k_sp <- min(30, nst-1); k_by <- min(10, nst-1)
   list(int=sprintf("s(long, lat, k=%d)", k_sp),
        by =paste(sprintf("s(long, lat, by=%s, k=%d)", resid_terms, k_by), collapse=" + ")) }

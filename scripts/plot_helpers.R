@@ -1,10 +1,10 @@
 # Shared median-band plot for the SFTS BBS/DBO figures.
-# Two stacked panels (species-wide on top, population-level below), each with a
-# bold IQR (25-75%, no caps) over a light capped 5-95% band, medians connected by
-# a line, and white-backed value labels. Each panel auto-ranges to its own data
-# (species-wide has no zero line; population-level is anchored at 0). The
+# Two stacked panels (species-wide on top, population-level below). Each model is a
+# boxplot: box = IQR (25-75%), whiskers = Tukey 1.5*IQR (outliers dropped), median
+# on a white chip inside the box; no connecting line. Each panel auto-ranges to its
+# own data (species-wide has no zero line; population-level is anchored at 0). The
 # population-level panel is shorter, matching its smaller spread.
-# NOTE: bands are the SPREAD ACROSS SPECIES/FAMILIES, not a confidence interval.
+# NOTE: boxes are the SPREAD ACROSS SPECIES/FAMILIES, not a confidence interval.
 
 library(tidyverse)
 library(patchwork)
@@ -20,12 +20,18 @@ library(patchwork)
 # split = NULL -> pooled (one band per model, current behaviour).
 # split = "mig2" or "mig3" -> join data/species_migration.rds and summarise per
 # group, dropping species with no trait. Adds a `grp` column (factor).
-.sfts_summ <- function(res_path, model_lv, split = NULL) {
+.sfts_summ <- function(res_path, model_lv, split = NULL, svc_path = NULL) {
   r <- readRDS(res_path)
   if (is.null(split)) {
     long <- r %>% select(ends_with("_sw"), ends_with("_pl")) %>%
       pivot_longer(everything(), names_to = "key", values_to = "r") %>%
       mutate(grp = factor("all"))
+    # RF SVC candidate (decomposed + coordinates) lives in a separate file; append its
+    # svc_sw/svc_pl so SVC becomes a 4th model. Existing result file is untouched.
+    if (!is.null(svc_path) && file.exists(svc_path)) {
+      long <- bind_rows(long, readRDS(svc_path) %>% select(ends_with("_sw"), ends_with("_pl")) %>%
+        pivot_longer(everything(), names_to = "key", values_to = "r") %>% mutate(grp = factor("all")))
+    }
   } else {
     tr <- readRDS("data/species_migration.rds") %>% select(species_id, grp = all_of(split))
     long <- r %>% left_join(tr, by = "species_id") %>% filter(!is.na(grp)) %>%
@@ -41,22 +47,26 @@ library(patchwork)
     group_by(metric, model, grp) %>%
     summarise(med = median(r, na.rm = TRUE), q05 = quantile(r, .05, na.rm = TRUE),
       q25 = quantile(r, .25, na.rm = TRUE), q75 = quantile(r, .75, na.rm = TRUE),
-      q95 = quantile(r, .95, na.rm = TRUE), .groups = "drop") %>%
+      q95 = quantile(r, .95, na.rm = TRUE),
+      # Tukey box whiskers (1.5*IQR), for the boxplot panels; outliers not kept
+      ymin = min(r[r >= quantile(r, .25, na.rm = TRUE) - 1.5 * IQR(r, na.rm = TRUE)], na.rm = TRUE),
+      ymax = max(r[r <= quantile(r, .75, na.rm = TRUE) + 1.5 * IQR(r, na.rm = TRUE)], na.rm = TRUE),
+      .groups = "drop") %>%
     mutate(model = factor(model, levels = model_lv))
 }
 
 .sfts_panel <- function(dd, colr, ylab, show_x, zero_line) {
-  g <- ggplot(dd, aes(model, med, group = 1))
+  g <- ggplot(dd, aes(model, med))
   if (zero_line) g <- g + geom_hline(yintercept = 0, linetype = 2, linewidth = 0.4, colour = "grey65")
   g <- g +
-    geom_errorbar(aes(ymin = q05, ymax = q95), width = 0.12, linewidth = 0.8, alpha = 0.45, colour = colr) +
-    geom_linerange(aes(ymin = q25, ymax = q75), linewidth = 1.9, colour = colr) +
-    geom_line(linewidth = 0.9, colour = colr) +
-    geom_point(size = 3, colour = colr) +
-    # median number beside its point (to the right, just below the line)
+    # box = IQR, whiskers = Tukey 1.5*IQR (outliers dropped); no connecting line
+    geom_boxplot(aes(lower = q25, upper = q75, middle = med, ymin = ymin, ymax = ymax),
+      stat = "identity", width = 0.5, fill = colr, colour = colr, alpha = 0.28,
+      linewidth = 0.6, na.rm = TRUE) +
+    # median number on a white chip inside each box
     geom_label(aes(label = sprintf("%.2f", med)), colour = colr, fill = "white",
-      label.size = 0, label.padding = unit(0.08, "lines"), nudge_x = 0.14, vjust = 1.35, size = 3.0) +
-    scale_y_continuous(breaks = scales::pretty_breaks(n = 5), expand = expansion(mult = c(0.08, 0.10))) +
+      label.size = 0, label.padding = unit(0.08, "lines"), fontface = 2, size = 3.0, na.rm = TRUE) +
+    scale_y_continuous(breaks = scales::pretty_breaks(n = 5), expand = expansion(mult = c(0.06, 0.08))) +
     coord_cartesian(clip = "off") +
     labs(y = ylab) +
     theme_bw(base_size = 12) +
@@ -181,9 +191,10 @@ make_medband_grid <- function(paths, treatments, out_stem, model_lv,
 # out (spatial extrapolation) and population-level from leave-one-YEAR-out
 # (temporal extrapolation). Both files must cover the same taxa for the panels to
 # be comparable.
-make_medband_split <- function(sw_path, pl_path, out_stem, title, model_lv, fig_width = 175) {
-  d_sw <- filter(.sfts_summ(sw_path, model_lv), metric == "sw")
-  d_pl <- filter(.sfts_summ(pl_path, model_lv), metric == "pl")
+make_medband_split <- function(sw_path, pl_path, out_stem, title, model_lv, fig_width = 175,
+                                sw_svc_path = NULL, pl_svc_path = NULL) {
+  d_sw <- filter(.sfts_summ(sw_path, model_lv, svc_path = sw_svc_path), metric == "sw")
+  d_pl <- filter(.sfts_summ(pl_path, model_lv, svc_path = pl_svc_path), metric == "pl")
   g_sw <- .sfts_panel(d_sw, "#DD9100", "Species-wide", FALSE, zero_line = FALSE) +   # BBS orange
     ggtitle(title) + theme(plot.title = element_text(size = 10.5))
   g_pl <- .sfts_panel(d_pl, "#254F9A", "Population-level", TRUE, zero_line = TRUE)   # BBS blue
@@ -201,10 +212,12 @@ make_medband_split <- function(sw_path, pl_path, out_stem, title, model_lv, fig_
 # changing performance are made explicit:
 #   x  = model type (Static -> SVC)                = relaxing the STE assumption ->
 #   rows (facet) = treatment (Temporal/Buffered/Spatiotemporal) = harder to transfer (down)
-# GAM vs RF are dodged and coloured within each model type (GAM centres at SVC,
-# which RF lacks). Median point + IQR (thick) + 5-95% (thin), NO connecting line;
-# the median value sits beside each point (GAM to the left, RF to the right). y is
-# free-scaled per row, gridlines every 0.2 (species-wide) / 0.1 (population-level).
+# GAM vs RF are dodged and coloured within each model type. Both families now reach
+# SVC: GAM via s(long,lat) + s(long,lat,by=resid); RF via the decomposed model plus
+# lat/long (fit_rf_bbs[_site]_svc.R), merged in from data/rf_bbs[_site]_svc_*.rds.
+# Each is a boxplot: box = IQR, whiskers = Tukey 1.5*IQR (outliers dropped), median on
+# a white chip inside the box. y is free-scaled per row, gridlines every 0.2
+# (species-wide) / 0.1 (population-level).
 # Two thick labelled arrows frame the axes. Reads data/{rf,gam}_bbs[_site]_*.rds.
 #   metric : "sw" (species-wide) or "pl" (population-level)
 #   scale  : "strata" or "site"
@@ -220,34 +233,46 @@ make_2axis <- function(metric, scale, out, width = 165, height = 178) {
   slab <- if (scale == "strata") "Strata" else "Site"
   ystep <- if (metric == "sw") 0.2 else 0.1
 
+  # per-model Tukey box stats; whiskers clipped to 1.5*IQR and outliers dropped from
+  # the plot data entirely, so no outlier points AND free y-axes train on whiskers only.
   summ <- function(path) readRDS(path) %>% select(ends_with(suff)) %>%
     pivot_longer(everything(), names_to = "key", values_to = "r") %>%
     mutate(model = recode(str_remove(key, paste0(suff, "$")),
                           static = "Static", dynamic = "Dynamic", decomp = "Decomposed", svc = "SVC")) %>%
-    filter(model %in% model_lv) %>% group_by(model) %>%
-    summarise(med = median(r, na.rm = TRUE), q05 = quantile(r, .05, na.rm = TRUE),
-              q25 = quantile(r, .25, na.rm = TRUE), q75 = quantile(r, .75, na.rm = TRUE),
-              q95 = quantile(r, .95, na.rm = TRUE), .groups = "drop")
+    filter(model %in% model_lv, !is.na(r)) %>% group_by(model) %>%
+    summarise(middle = median(r), lower = quantile(r, .25), upper = quantile(r, .75),
+              iqr = upper - lower,
+              ymin = min(r[r >= lower - 1.5 * iqr]), ymax = max(r[r <= upper + 1.5 * iqr]),
+              .groups = "drop")
   fam_paths <- list(
     RF  = setNames(sprintf("data/%s_%s.rds", pre["rf"],  trt), names(trt)),
     GAM = setNames(sprintf("data/%s_%s.rds", pre["gam"], trt), names(trt)))
+  # The RF SVC candidate (decomposed + lat/long, from fit_rf_bbs[_site]_svc.R) lives in
+  # separate files; merge it in as RF's 4th model so both families reach SVC. The
+  # existing RF static/dynamic/decomposed result files are untouched.
+  rf_svc <- setNames(sprintf("data/%s_svc_%s.rds", pre["rf"], trt), names(trt))
   d <- purrr::imap_dfr(fam_paths, function(paths, fam)
-         purrr::imap_dfr(paths, function(p, tr) mutate(summ(p), family = fam, treatment = tr))) %>%
+         purrr::imap_dfr(paths, function(p, tr) {
+           s <- summ(p)
+           if (fam == "RF" && file.exists(rf_svc[[tr]])) s <- bind_rows(s, summ(rf_svc[[tr]]))
+           mutate(s, family = fam, treatment = tr)
+         })) %>%
     mutate(family = factor(family, levels = c("GAM","RF")), model = factor(model, levels = model_lv),
-           treatment = factor(treatment, levels = trt_lv))   # no complete() -> GAM centres at SVC
+           treatment = factor(treatment, levels = trt_lv))
 
-  pd <- position_dodge(width = 0.55)
-  main <- ggplot(d, aes(model, med, colour = family, group = family)) +
+  pd   <- position_dodge(width = 0.66)
+  chip <- if (metric == "sw") 2.6 else 2.2   # median-label chip; smaller where pop-level boxes are short
+  main <- ggplot(d, aes(model, middle, colour = family, fill = family)) +
     geom_hline(yintercept = 0, linetype = 2, linewidth = 0.3, colour = "grey70") +
-    geom_linerange(aes(ymin = q05, ymax = q95), linewidth = 0.6, alpha = 0.5, position = pd, na.rm = TRUE) +
-    geom_linerange(aes(ymin = q25, ymax = q75), linewidth = 1.9, position = pd, na.rm = TRUE) +
-    geom_point(size = 2.1, position = pd, na.rm = TRUE) +
-    geom_text(aes(y = med, label = sprintf("%.2f", med), hjust = ifelse(family == "GAM", 1.45, -0.45)),
-              position = pd, vjust = 0.4, size = 2.0, show.legend = FALSE, na.rm = TRUE) +
+    geom_boxplot(aes(lower = lower, upper = upper, middle = middle, ymin = ymin, ymax = ymax),
+                 stat = "identity", position = pd, width = 0.5, alpha = 0.28, linewidth = 0.6, na.rm = TRUE) +
+    geom_label(aes(y = middle, label = sprintf("%.2f", middle)),
+               position = pd, fill = "white", label.size = 0, label.padding = unit(0.08, "lines"),
+               fontface = 2, size = chip, show.legend = FALSE, na.rm = TRUE) +
     facet_grid(treatment ~ ., scales = "free_y") +
-    scale_colour_manual(values = fam_cols, name = NULL) +
+    scale_colour_manual(values = fam_cols, name = NULL, aesthetics = c("colour", "fill")) +
     coord_cartesian(clip = "off") +
-    scale_y_continuous(breaks = seq(-1, 1, ystep), expand = expansion(mult = c(0.05, 0.07))) +
+    scale_y_continuous(breaks = seq(-1, 1, ystep), expand = expansion(mult = c(0.06, 0.08))) +
     labs(x = NULL, y = paste0(mlab, " correlation (r)")) + theme_bw(base_size = 11) +
     theme(panel.grid.minor = element_blank(), panel.grid.major.x = element_blank(),
           panel.border = element_rect(colour = "grey80", fill = NA, linewidth = 0.5),

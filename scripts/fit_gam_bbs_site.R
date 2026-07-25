@@ -31,6 +31,18 @@ clamp <- function(newd, tr, cols) { for (v in cols) { r <- range(tr[[v]], na.rm=
 
 mods <- function(tr, te) {
   nsite <- n_distinct(tr$site_id); k_sp <- min(60, nsite-1); k_by <- min(25, nsite-1)
+  # SVC terms follow Thorson et al. 2023 (Ecography, doi:10.1111/ecog.06510):
+  # y ~ s(lat,lon) + s(lat,lon, by=x), varying both intercept and slopes over space.
+  #   svc_int = s(long,lat)          -> spatially varying INTERCEPT a_s; this is the
+  #     term that "addresses spatial autocorrelation" (a low-rank/thin-plate-spline
+  #     stand-in for a Gaussian random field over space, soaking up SAC in the mean).
+  #     So the SVC already accounts for SAC; no separate corExp residual structure is
+  #     needed for a Gaussian response (spatial field in the linear predictor and
+  #     correlated errors are two encodings of the same dependence). Use bs="gp" for
+  #     an explicit range if the geostatistical form is wanted.
+  #   svc_by  = s(long,lat, by=resid) -> spatially varying SLOPES b_s (SVC proper).
+  # Both fields are fit in TRAINING space, so they extrapolate under spatial CV and
+  # are fixed-in-time under temporal splits -> SVC ~ static at the population level.
   svc_int <- sprintf("s(long, lat, k=%d)", k_sp)
   svc_by  <- paste(sprintf("s(long, lat, by=%s, k=%d)", resid_terms, k_by), collapse=" + ")
   f_static  <- as.formula(paste("log(abundance) ~", rhs_static))
