@@ -91,6 +91,26 @@ idx_dbo <- which(data_env_sel$DBOreg %in% c(1, 2, 3))
 data_fam_gc <- data_fam_gc[idx_dbo, ]
 data_env_sel <- data_env_sel[idx_dbo, ]
 
+## BALANCE FIX -------------------------------------------------------------
+## Two independent sources of imbalance in the station x year grid (73% filled):
+##  (1) The seven SEC stations in DBO 3 all begin in 2012 or 2014, while every
+##      other station begins 2001-2004. They contribute nothing to a 2001-2010
+##      training period, and under LOSO they make DBO 3's regional composition
+##      jump from 7 to 10 to 14 stations mid-series -- a composition shift
+##      confounded with time. Dropping them also rebalances stations per region
+##      from 5/4/14 to 5/4/7. (UTN5=SEC1 is a UTN-era station from 2004 and stays.)
+##  (2) Years 2008 (5 stations) and 2010 (6) are sparsely sampled, against 13-16
+##      elsewhere. Dropping them costs ~11 station-years but takes training-period
+##      fill from 74% to 88%.
+## Applied here, before the family/station gates below, so those gates operate on
+## the retained grid. Result: 16 stations, 15 years, 94% fill.
+idx_bal <- which(
+  !grepl("^SEC[2-8]$", data_env_sel$StationNme) &
+    !data_env_sel$DataYear %in% c(2008, 2010)
+)
+data_fam_gc <- data_fam_gc[idx_bal, ]
+data_env_sel <- data_env_sel[idx_bal, ]
+
 ## remove NAs
 idx_na <- foreach(i = 1:ncol(data_env_sel), .combine = "c") %do%
   {
@@ -244,3 +264,27 @@ cat("Saved data/data_dbo.rds:", nrow(data_rf), "rows,",
     dplyr::n_distinct(data_rf$family), "families,",
     dplyr::n_distinct(data_rf$StationNme), "stations,",
     "years", paste(range(data_rf$DataYear), collapse = "-"), "\n")
+
+
+# ZEROS-RETAINED VERSION --------------------------------------------------
+# Identical in every respect except that the "remove 0s" step above (which built
+# data_fam_gc4 from data_fam_gc3) is skipped. All family/station gates upstream
+# already count POSITIVE records only -- year_n uses length(biomass[biomass > 0])
+# with n > 4, and site_n counts stations among those -- so zeros never contribute
+# to sample size; they are retained purely as observations of absence.
+# This yields a panel that is COMPLETE over every sampled station-year for each
+# retained family x station, rather than the ~55%-filled ragged panel that results
+# from dropping zeros. Used for the raw-scale (untransformed biomass) analysis.
+
+data_rf_zeros <- inner_join(
+  data_fam_gc3,
+  data_env_dec,
+  by = c("StationNme", "DataYear")
+)
+
+saveRDS(data_rf_zeros, "data/data_dbo_zeros.rds")
+cat("Saved data/data_dbo_zeros.rds:", nrow(data_rf_zeros), "rows (",
+    sum(data_rf_zeros$biomass == 0), "zeros ),",
+    dplyr::n_distinct(data_rf_zeros$family), "families,",
+    dplyr::n_distinct(data_rf_zeros$StationNme), "stations,",
+    "years", paste(range(data_rf_zeros$DataYear), collapse = "-"), "\n")

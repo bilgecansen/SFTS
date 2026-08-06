@@ -70,32 +70,35 @@ res <- map_dfr(seq_along(families), function(i) {
   stations <- sort(unique(df$StationNme))
 
   # leave-one-station-out: hold out an entire station (all its years)
-  oos <- map_dfr(stations, function(s) {
+  per <- map(stations, function(s) {
     tr <- filter(df, StationNme != s)
     te <- filter(df, StationNme == s)
     if (nrow(tr) < 10 || nrow(te) < 1) return(NULL)
 
-    # static: trained on climatological (_spatial) means of the OTHER stations,
-    # projected onto the held-out station's actual per-year environment (raw
-    # values renamed to _spatial), as in fit_rf_dbo_3models.R
-    tr_st <- select(tr, biomass, all_of(ctrl), all_of(paste0(base, "_spatial")))
-    te_st <- te %>%
-      select(all_of(ctrl), all_of(base)) %>%
-      rename_with(~ paste0(., "_spatial"), all_of(base))
+    # static: trained on climatological (_spatial) means of the OTHER stations. It now
+    # feeds DIFFERENT data to the two metrics. Population-level: the held-out station's
+    # actual per-year environment (raw renamed to _spatial). Species-wide: the held-out
+    # station's MEAN env -> one prediction (matches the decomposed model's spatial
+    # channel, and predicts the station mean directly).
+    m_st  <- ranger(log(biomass) ~ ., data = select(tr, biomass, all_of(ctrl), all_of(paste0(base, "_spatial"))), num.trees = NTREE)
+    te_st <- te %>% select(all_of(ctrl), all_of(base)) %>% rename_with(~ paste0(., "_spatial"), all_of(base))
+    p_static_yr <- as.numeric(predict(m_st, te_st)$predictions)                       # raw yearly -> pop-level
+    p_static_sw <- as.numeric(predict(m_st, summarise(te_st, across(everything(), mean)))$predictions)  # mean env -> species-wide
 
     tr_dy <- select(tr, biomass, all_of(ctrl), all_of(base))
     te_dy <- select(te, all_of(ctrl), all_of(base))
-
     tr_dc <- select(tr, biomass, all_of(ctrl), all_of(comp_terms))
     te_dc <- select(te, all_of(ctrl), all_of(comp_terms))
 
-    tibble(
-      stn = te$StationNme, year = te$DataYear, y = log(te$biomass),
-      p_static = fit_pred(tr_st, te_st),
-      p_dynamic = fit_pred(tr_dy, te_dy),
-      p_decomp = fit_pred(tr_dc, te_dc)
+    list(
+      yr = tibble(stn = te$StationNme, year = te$DataYear, y = log(te$biomass),
+        p_static = p_static_yr, p_dynamic = fit_pred(tr_dy, te_dy), p_decomp = fit_pred(tr_dc, te_dc)),
+      sw = tibble(stn = s, o = mean(log(te$biomass)), p = p_static_sw)
     )
   })
+  per <- per[!map_lgl(per, is.null)]
+  if (length(per) < 2) return(NULL)
+  oos <- bind_rows(map(per, "yr")); oos_sw <- bind_rows(map(per, "sw"))
   if (nrow(oos) < min_years) return(NULL)
 
   if (i %% 10 == 0 || i == length(families)) {
@@ -106,7 +109,7 @@ res <- map_dfr(seq_along(families), function(i) {
 
   tibble(
     family = fm, n_stn = n_distinct(df$StationNme), rows = nrow(df),
-    static_sw = swcor(oos$stn, oos$y, oos$p_static),
+    static_sw = suppressWarnings(cor(oos_sw$o, oos_sw$p)),       # M2: mean-env, one prediction per station
     static_pl = plcor(oos$stn, oos$y, oos$p_static),
     dynamic_sw = swcor(oos$stn, oos$y, oos$p_dynamic),
     dynamic_pl = plcor(oos$stn, oos$y, oos$p_dynamic),

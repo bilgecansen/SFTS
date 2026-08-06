@@ -1,0 +1,12 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+figures/*.key
+figures/plots_sim.rds
+
+data_bbs.rds
+data_env.rds
+data_prism.rds
+prismdata/
+alt/
