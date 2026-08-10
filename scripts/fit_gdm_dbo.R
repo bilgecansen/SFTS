@@ -1,41 +1,47 @@
 # DBO community turnover with Generalized Dissimilarity Modelling (GDM).
-# Complementary to the single-family SDM analysis: predicts COMPOSITIONAL TURNOVER between
-# pairs of station-years rather than one taxon's biomass.
+# Complementary to the single-taxon random-forest analysis: predicts COMPOSITIONAL
+# TURNOVER between pairs of station-years rather than one taxon's biomass.
+#
+# Family level only, 57 families (data/dbo_resp_family.rds).
 #
 # TWO MODELS, both ordinary GDMs, each fitted and tested on its own class of site pairs:
 #   SPATIAL TURNOVER  : pairs = same year, different station. Predictors are the 11 raw
-#                       environmental variables + Depth, with geographic distance (geo=TRUE).
-#                       The standard spatial-turnover GDM, pooled across years.
+#                       environmental variables + Depth, with geographic distance
+#                       (geo = TRUE). The standard spatial-turnover GDM, pooled across
+#                       years.
 #   TEMPORAL TURNOVER : pairs = same station, different year. Predictors are the 11 raw
 #                       environmental variables only. Depth and geographic distance are
 #                       CONSTANT within a station, so their pairwise difference is
 #                       identically zero and they carry no information here -- they are
 #                       dropped rather than fitted as inert splines (geo = FALSE).
 #
-# Response: Bray-Curtis dissimilarity on FOURTH-ROOT biomass across 57 families -- the same
-# scale as the single-family analysis, and the benthic convention.
+# The environment enters RAW in both models, so the four-component decomposition built by
+# wrangle_dbo_data.R does not reach this script.
+#
+# Response: Bray-Curtis dissimilarity on FOURTH-ROOT biomass -- the same scale as the
+# random-forest analysis, and the benthic convention.
 #
 # TWO HOLDOUTS, both applied at the UNIT level (every pair touching a held-out unit is
-# removed; each station-year sits in ~225 pairs, so random pair holdout would leak badly):
-#   LOSO       : hold out a station. Global full-period decomposition of the environment is
-#                irrelevant here since only raw values are used.
-#   train/test : fit on pairs with both members in 2001-2007, test on pairs with both
-#                members in 2011-2019.
+# removed; each station-year sits in ~225 pairs, so random pair holdout would leak):
+#   LOSO       : hold out a station.
+#   train/test : split the 15 sampled years by COUNT, 8 training years (2001, 2003-2007,
+#                2011-2012) against 7 test years (2013-2019). Pairs must have both
+#                members inside one block.
 #
-# LOSO DOUBLE-COUNTING. A pair has two members, so either being held out puts the pair in a
-# test set: a pair between stations A and B is scored twice, once by the model trained
+# LOSO DOUBLE-COUNTING. A pair has two members, so either being held out puts the pair in
+# a test set: a pair between stations A and B is scored twice, once by the model trained
 # without A and once by the model trained without B. Cross-station (spatial) pairs are
 # therefore doubled; temporal pairs are not, since both members are the same station. The
-# two predictions are also correlated, the models sharing 14 of 16 stations. Here each pair
-# is scored ONCE, by averaging its predictions, and n reports true pair counts.
+# two predictions are also correlated, the models sharing 14 of 16 stations. Here each
+# pair is scored ONCE, by averaging its predictions, and n reports true pair counts.
 #
-# Metric: skill = 1 - SSE / SS_obs, with SS_obs taken about the MEAN OBSERVED DISSIMILARITY
-# of the test pairs. That null matters: sampling noise puts an unknown floor under temporal
-# dissimilarity, so scoring against the mean asks whether the model explains VARIATION in
-# turnover rather than its absolute level. Correlation and RMSE reported alongside.
+# Metric: skill = 1 - SSE / SS_obs, with SS_obs taken about the MEAN OBSERVED
+# DISSIMILARITY of the test pairs. That null matters: sampling noise puts an unknown
+# floor under temporal dissimilarity, so scoring against the mean asks whether the model
+# explains VARIATION in turnover rather than its absolute level. Correlation and RMSE are
+# reported alongside.
 #
-# Output: data/gdm_dbo_results.rds (summary), data/gdm_dbo_preds.rds (pair-level predictions
-#         with pair class and region-pair labels attached, for scripts/plot_gdm_dbo.R)
+# Output: data/gdm_dbo_results.rds, data/gdm_dbo_preds.rds -> scripts/plot_gdm_dbo.R
 
 suppressMessages({
   library(gdm)
@@ -46,24 +52,30 @@ suppressMessages({
 set.seed(1)
 base <- c("Temp", "Salinity", "integchla", "sedchla", "Ammonia", "Phosphate",
           "NiTriTra", "Silicate", "phigte5", "TOC", "cn")
-TRAIN_YRS <- 2001:2007; TEST_YRS <- 2011:2019
+N_TRAIN <- 8                       # number of sampled years in the training block
 
 z <- readRDS("data/data_dbo_zeros.rds")
 
-# ---- community matrix + Bray-Curtis on fourth-root biomass ---------------------------
-comm <- z %>% mutate(v = biomass^0.25) %>%
-  select(StationNme, DataYear, family, v) %>%
-  pivot_wider(names_from = family, values_from = v, values_fill = 0) %>%
-  arrange(StationNme, DataYear)
-key <- comm %>% select(StationNme, DataYear)
-D <- as.matrix(vegdist(as.matrix(comm[, -(1:2)]), method = "bray"))
-
+# ---- site table -----------------------------------------------------------------------
+key <- z %>% distinct(StationNme, DataYear) %>% arrange(StationNme, DataYear)
 sites <- z %>% distinct(StationNme, DataYear, .keep_all = TRUE) %>%
   select(StationNme, DataYear, DBOreg, Latitude, Longitude, Depth, all_of(base))
 sord <- key %>% inner_join(sites, by = c("StationNme", "DataYear")) %>% as.data.frame()
-stopifnot(identical(paste(sord$StationNme, sord$DataYear), paste(key$StationNme, key$DataYear)))
+stopifnot(nrow(sord) == nrow(key))
 
-# ---- all pairs, with class and a stable pair id --------------------------------------
+yrs <- sort(unique(sord$DataYear))
+TRAIN_YRS <- yrs[seq_len(N_TRAIN)]; TEST_YRS <- yrs[-seq_len(N_TRAIN)]
+
+# ---- community matrix, Bray-Curtis, and the pair table --------------------------------
+comm <- readRDS("data/dbo_resp_family.rds") %>% mutate(v = biomass^0.25) %>%
+  select(StationNme, DataYear, taxon, v) %>%
+  pivot_wider(names_from = taxon, values_from = v, values_fill = 0) %>%
+  right_join(key, by = c("StationNme", "DataYear")) %>%
+  arrange(StationNme, DataYear) %>% mutate(across(-(1:2), ~ replace_na(.x, 0)))
+stopifnot(identical(paste(comm$StationNme, comm$DataYear),
+                    paste(sord$StationNme, sord$DataYear)))
+D <- as.matrix(vegdist(as.matrix(comm[, -(1:2)]), method = "bray"))
+
 ij <- t(combn(nrow(sord), 2))
 pairs_all <- tibble(ki = ij[, 1], kj = ij[, 2],
     distance = D[cbind(ij[, 1], ij[, 2])],
@@ -81,9 +93,13 @@ pairs_all <- tibble(ki = ij[, 1], kj = ij[, 2],
          kind = ifelse(r1 == r2, "Within region", "Between regions")) %>%
   filter(is.finite(distance))
 
-cat(sprintf("%d station-years, %d pairs (spatial %d, temporal %d, spatiotemporal %d)\n\n",
-  nrow(sord), nrow(pairs_all), sum(pairs_all$cls == "spatial"),
-  sum(pairs_all$cls == "temporal"), sum(pairs_all$cls == "spatiotemporal")))
+cat(sprintf("train %d years (%s) | test %d years (%s)\n",
+    length(TRAIN_YRS), paste(range(TRAIN_YRS), collapse = "-"),
+    length(TEST_YRS),  paste(range(TEST_YRS),  collapse = "-")))
+cat(sprintf("%d station-years, %d pairs (spatial %d, temporal %d, spatiotemporal %d), mean BC %.3f\n\n",
+    nrow(sord), nrow(pairs_all), sum(pairs_all$cls == "spatial"),
+    sum(pairs_all$cls == "temporal"), sum(pairs_all$cls == "spatiotemporal"),
+    mean(pairs_all$distance)))
 
 # NOTE: rownames MUST be reset. Indexing sord by repeated row indices yields mangled
 # rownames ("15", "15.1", ...), and gdm() SEGFAULTS on those in its C code rather than

@@ -202,47 +202,63 @@ data_env_sel2 <- cbind(z3, z2[, -(1:2)])
 ## these covariates vary across space and time and we should decompose them
 decomp_vars <- colnames(data_env_sel2)[-(1:10)]
 
-data_env_dec <- data_env_sel2 %>%
-  # center without scaling
-  dplyr::mutate(across(all_of(decomp_vars), ~ scale(., scale = FALSE)[, 1])) %>%
+## FOUR-COMPONENT DECOMPOSITION --------------------------------------------
+## Sequential orthogonal projections onto nested subspaces
+##     station  ->  year  ->  region:year  ->  residual
+## giving, per variable, _spatial / _global / _regional / _residual, which sum
+## exactly to the globally centered value. This matches the four-way error
+## decomposition in scripts/skill_dbo_4rt.R term for term, so the predictor
+## components and the prediction components line up.
+##
+## Station is nested within region, so the region main effect lies inside BOTH
+## the station subspace and the region:year subspace. Entering station FIRST
+## assigns it to _spatial, where a time-invariant latitudinal gradient belongs;
+## _regional then carries the region x year interaction alone.
+##
+## _spatial is unchanged from the earlier three-component version (a projection
+## on a single factor is the group mean). _global replaces the old _temporal --
+## the year effect, now adjusted for station. _regional is new and takes its
+## variance out of what was previously _residual: sedchla 65% -> 46%,
+## integchla 50% -> 38%, Temp 11% -> 4%.
+##
+## na.exclude keeps fitted() the same length as the data if any NA slips through
+## the upstream NA gate.
+data_env_dec <- dplyr::arrange(data_env_sel2, StationNme, DataYear)
 
-  # compute the spatial component
-  # (mean by pixel across all years of centered variables)
-  dplyr::group_by(StationNme) %>%
-  dplyr::mutate(across(
-    all_of(decomp_vars),
-    ~ mean(., na.rm = TRUE),
-    .names = "{.col}_spatial"
-  )) %>%
-  dplyr::ungroup() %>%
-  # compute the temporal component
-  # (mean by year across all pixels of centered variables)
-  dplyr::group_by(DataYear) %>%
-  dplyr::mutate(across(
-    all_of(decomp_vars),
-    ~ mean(., na.rm = TRUE),
-    .names = "{.col}_temporal"
-  )) %>%
-  dplyr::ungroup() %>%
+.stn <- factor(data_env_dec$StationNme)
+.yr <- factor(data_env_dec$DataYear)
+.ry <- factor(paste(data_env_dec$DBOreg, data_env_dec$DataYear))
 
-  # compute residual for each site i and year j as centered variable value
-  # i,j - spatial mean i - temporal mean j
-  dplyr::mutate(across(
-    tidyselect::all_of(decomp_vars),
-    ~ . -
-      get(paste0(cur_column(), "_spatial")) -
-      get(paste0(cur_column(), "_temporal")),
-    .names = "{.col}_residual"
-  )) %>%
-  dplyr::arrange(StationNme, DataYear) %>%
-  select(
-    -CruiseID,
-    -StationNum,
-    -uniqueID,
-    -DataDate,
-    -Latitude,
-    -Longitude
-  )
+for (v in decomp_vars) {
+  x <- data_env_dec[[v]] - mean(data_env_dec[[v]], na.rm = TRUE)
+  f1 <- fitted(lm(x ~ .stn, na.action = na.exclude))
+  f2 <- fitted(lm(x ~ .stn + .yr, na.action = na.exclude))
+  f3 <- fitted(lm(x ~ .stn + .yr + .ry, na.action = na.exclude))
+  data_env_dec[[v]] <- x
+  data_env_dec[[paste0(v, "_spatial")]] <- as.numeric(f1)
+  data_env_dec[[paste0(v, "_global")]] <- as.numeric(f2 - f1)
+  data_env_dec[[paste0(v, "_regional")]] <- as.numeric(f3 - f2)
+  data_env_dec[[paste0(v, "_residual")]] <- as.numeric(x - f3)
+}
+
+## the retained grab for each station-year, kept so that other taxonomic levels
+## (scripts/wrangle_dbo_agg.R) can be joined on uniqueID rather than on
+## StationNme + DataYear -- 21 station-years have two grabs in the raw NOAA
+## files and only one of them survives the filters above.
+saveRDS(
+  select(data_env_dec, uniqueID, StationNme, DataYear, DBOreg),
+  "data/dbo_grabkey.rds"
+)
+
+data_env_dec <- select(
+  data_env_dec,
+  -CruiseID,
+  -StationNum,
+  -uniqueID,
+  -DataDate,
+  -Latitude,
+  -Longitude
+)
 
 
 # Biomass RF models -------------------------------------------------------
