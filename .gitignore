@@ -10,3 +10,5 @@ data_env.rds
 data_prism.rds
 prismdata/
 alt/
+.DS_Store
+**/.DS_Store

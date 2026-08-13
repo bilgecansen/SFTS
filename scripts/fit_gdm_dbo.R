@@ -6,14 +6,23 @@
 #
 # TWO MODELS, both ordinary GDMs, each fitted and tested on its own class of site pairs:
 #   SPATIAL TURNOVER  : pairs = same year, different station. Predictors are the 11 raw
-#                       environmental variables + Depth, with geographic distance
+#                       environmental variables + breakup + Depth, with geographic distance
 #                       (geo = TRUE). The standard spatial-turnover GDM, pooled across
 #                       years.
 #   TEMPORAL TURNOVER : pairs = same station, different year. Predictors are the 11 raw
-#                       environmental variables only. Depth and geographic distance are
+#                       environmental variables + breakup. Depth and geographic distance are
 #                       CONSTANT within a station, so their pairwise difference is
 #                       identically zero and they carry no information here -- they are
 #                       dropped rather than fitted as inert splines (geo = FALSE).
+#
+# SEA ICE. breakup -- the day of year on which the longest continuous ice run ends, from
+# data/data_sic_vars.rds -- enters RAW alongside the in-situ variables. It needs no
+# decomposition here because the pair structure already separates the two dimensions:
+# spatial pairs are same-year so only between-station differences in breakup contribute,
+# and temporal pairs are same-station so only within-station differences do. That is the
+# same separation the random-forest analysis achieves by withholding breakup_spatial.
+# SLIP1 and SLIP2 had no ice at all in 2018, so their breakup is undefined and takes the
+# station median -- two station-years of 226.
 #
 # The environment enters RAW in both models, so the four-component decomposition built by
 # wrangle_dbo_data.R does not reach this script.
@@ -52,16 +61,24 @@ suppressMessages({
 set.seed(1)
 base <- c("Temp", "Salinity", "integchla", "sedchla", "Ammonia", "Phosphate",
           "NiTriTra", "Silicate", "phigte5", "TOC", "cn")
+ICE <- "breakup"
+ENV <- c(base, ICE)
 N_TRAIN <- 8                       # number of sampled years in the training block
 
 z <- readRDS("data/data_dbo_zeros.rds")
 
+ice <- readRDS("data/data_sic_vars.rds") %>%
+  select(StationNme, DataYear, all_of(ICE)) %>% group_by(StationNme) %>%
+  mutate(breakup = ifelse(is.na(breakup), median(breakup, na.rm = TRUE), breakup)) %>%
+  ungroup()
+
 # ---- site table -----------------------------------------------------------------------
 key <- z %>% distinct(StationNme, DataYear) %>% arrange(StationNme, DataYear)
 sites <- z %>% distinct(StationNme, DataYear, .keep_all = TRUE) %>%
-  select(StationNme, DataYear, DBOreg, Latitude, Longitude, Depth, all_of(base))
+  select(StationNme, DataYear, DBOreg, Latitude, Longitude, Depth, all_of(base)) %>%
+  inner_join(ice, by = c("StationNme", "DataYear"))
 sord <- key %>% inner_join(sites, by = c("StationNme", "DataYear")) %>% as.data.frame()
-stopifnot(nrow(sord) == nrow(key))
+stopifnot(nrow(sord) == nrow(key), !anyNA(sord[ENV]))
 
 yrs <- sort(unique(sord$DataYear))
 TRAIN_YRS <- yrs[seq_len(N_TRAIN)]; TEST_YRS <- yrs[-seq_len(N_TRAIN)]
@@ -118,8 +135,8 @@ gdm_table <- function(pr, vars) {
 }
 
 MODELS <- list(
-  `Spatial turnover`  = list(cls = "spatial",  vars = c(base, "Depth"), geo = TRUE),
-  `Temporal turnover` = list(cls = "temporal", vars = base,             geo = FALSE))
+  `Spatial turnover`  = list(cls = "spatial",  vars = c(ENV, "Depth"), geo = TRUE),
+  `Temporal turnover` = list(cls = "temporal", vars = ENV,             geo = FALSE))
 
 fit_predict <- function(spec, trp, tep) {
   if (nrow(trp) < 60 || nrow(tep) < 5) return(NULL)
